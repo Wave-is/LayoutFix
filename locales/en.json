@@ -1,0 +1,16 @@
+{
+  "Settings_Title": "LayoutFix - Settings",
+  "Settings_Hotkeys": "Hotkeys",
+  "Settings_Exceptions": "Exceptions",
+  "Settings_General": "General",
+  "Settings_About": "About",
+  "Settings_Dict": "Dictionary",
+  "Settings_AutoStart": "Start with Windows",
+  "Settings_Sound": "Enable sound notifications",
+  "Settings_Flags": "Use country flags in tray",
+  "Settings_AutoConv": "Enable auto-conversion during typing",
+  "Settings_ProcessName": "Process name (e.g., devenv.exe):",
+  "Settings_Add": "Add",
+  "Settings_Remove": "Remove",
+  "Settings_ExceptionWord": "Word to never auto-convert:"
+}

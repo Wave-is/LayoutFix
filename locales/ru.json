@@ -1,0 +1,16 @@
+{
+  "Settings_Title": "LayoutFix - Настройки",
+  "Settings_Hotkeys": "Горячие клавиши",
+  "Settings_Exceptions": "Исключения",
+  "Settings_General": "Общие",
+  "Settings_About": "О программе",
+  "Settings_Dict": "Словарь",
+  "Settings_AutoStart": "Запускать вместе с Windows",
+  "Settings_Sound": "Включить звуковые уведомления",
+  "Settings_Flags": "Использовать флаги стран вместо текста в трее",
+  "Settings_AutoConv": "Включить автопереключение раскладки (в процессе набора)",
+  "Settings_ProcessName": "Имя процесса (например, devenv.exe):",
+  "Settings_Add": "Добавить",
+  "Settings_Remove": "Удалить",
+  "Settings_ExceptionWord": "Слово-исключение (не переключать):"
+}
