@@ -62,6 +62,8 @@ public class SettingsForm : Form
 
         this.Controls.Add(tabControl);
 
+        ThemeManager.ApplyTheme(this);
+
         this.FormClosing += (s, e) =>
         {
             _currentSettings.AutoStart = _chkAutoStart.Checked;
@@ -218,14 +220,15 @@ public class SettingsForm : Form
 
     private void UpdateCellAppearance(DataGridViewCell cell, bool enabled)
     {
+        bool isDark = ThemeManager.IsDarkTheme();
         if (enabled)
         {
-            cell.Style.ForeColor = Color.Black;
+            cell.Style.ForeColor = isDark ? Color.White : Color.Black;
             cell.Style.Font = new Font(_gridHotkeys.Font, FontStyle.Regular);
         }
         else
         {
-            cell.Style.ForeColor = Color.Gray;
+            cell.Style.ForeColor = isDark ? Color.FromArgb(120, 120, 120) : Color.Gray;
             cell.Style.Font = new Font(_gridHotkeys.Font, FontStyle.Strikeout);
         }
     }
