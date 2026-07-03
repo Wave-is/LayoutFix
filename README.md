@@ -11,12 +11,6 @@
 
 <br>
 
-<div align="center">
-  <img src="assets/screenshot_dark.png" alt="LayoutFix Dark Theme Settings" width="600" />
-</div>
-
-<br>
-
 ---
 
 ## 🇺🇸 English
