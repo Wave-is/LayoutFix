@@ -88,10 +88,20 @@ public static class ThemeManager
                 grid.ColumnHeadersDefaultCellStyle.ForeColor = foreColor;
                 grid.EnableHeadersVisualStyles = false;
             }
+            else if (control is Label || control is CheckBox || control is RadioButton || control is GroupBox)
+            {
+                control.BackColor = Color.Transparent;
+                control.ForeColor = foreColor;
+            }
+            else if (control is NumericUpDown || control is ComboBox)
+            {
+                control.BackColor = inputBackColor;
+                control.ForeColor = foreColor;
+            }
             else
             {
-                // Labels, CheckBoxes, etc.
-                control.BackColor = Color.Transparent;
+                // Fallback for TabControl, TrackBar, etc.
+                control.BackColor = panelBackColor;
                 control.ForeColor = foreColor;
             }
 

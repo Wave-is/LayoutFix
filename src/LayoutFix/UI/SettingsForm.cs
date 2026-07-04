@@ -28,6 +28,7 @@ public class SettingsForm : Form
         _currentSettings = _settingsService.Current;
         
         InitializeComponent();
+        this.Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
     }
 
     private void InitializeComponent()

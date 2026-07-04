@@ -15,7 +15,15 @@
 
 ## 🇺🇸 English
 
-**LayoutFix** is a smart, native Windows utility that corrects incorrectly typed text when you forget to switch your keyboard layout. Say goodbye to retyping `vfibyf` into `машина` manually.
+# LayoutFix 🛠️
+
+<p align="center">
+  <img src="assets/logo.png" alt="LayoutFix Logo" width="256">
+</p>
+
+![LayoutFix Dark Theme](assets/screenshot_dark.png)
+
+A lightweight system tray utility that solves keyboard layout switching issues. **LayoutFix** is a smart, native Windows utility that corrects incorrectly typed text when you forget to switch your keyboard layout. Say goodbye to retyping `vfibyf` into `машина` manually.
 
 ### Core Features:
 - **Zero-Configuration Magic**: Automatically detects installed Windows keyboard layouts. No static JSON dictionaries required!

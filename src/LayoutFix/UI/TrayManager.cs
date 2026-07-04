@@ -16,11 +16,13 @@ public class TrayManager : IDisposable
     private readonly System.Windows.Forms.Timer _layoutTimer;
     private string _lastLayout = string.Empty;
     private bool _lastUseFlagIcons = true;
+    private bool _lastEnabled = true;
 
     public TrayManager(ISettingsService settingsService, IHotkeyCoordinator hotkeyCoordinator)
     {
         _settingsService = settingsService;
         _lastUseFlagIcons = _settingsService.Current.UseFlagIcons;
+        _lastEnabled = _settingsService.Current.AutoConversionEnabled;
         _hotkeyCoordinator = hotkeyCoordinator;
 
         _notifyIcon = new NotifyIcon
@@ -58,11 +60,13 @@ public class TrayManager : IDisposable
     {
         string currentLayout = GetActiveLayout();
         bool currentUseFlags = _settingsService.Current.UseFlagIcons;
+        bool currentEnabled = _settingsService.Current.AutoConversionEnabled;
 
-        if (currentLayout != _lastLayout || currentUseFlags != _lastUseFlagIcons)
+        if (currentLayout != _lastLayout || currentUseFlags != _lastUseFlagIcons || currentEnabled != _lastEnabled)
         {
             _lastLayout = currentLayout;
             _lastUseFlagIcons = currentUseFlags;
+            _lastEnabled = currentEnabled;
             UpdateTrayIcon();
         }
     }
@@ -92,6 +96,8 @@ public class TrayManager : IDisposable
         var text = string.IsNullOrEmpty(_lastLayout) ? "EN" : _lastLayout;
         if (text.Length > 2) text = text.Substring(0, 2);
         
+        bool isEnabled = _settingsService.Current.AutoConversionEnabled;
+
         if (_settingsService.Current.UseFlagIcons)
         {
             DrawFlag(graphics, text, size);
@@ -117,6 +123,12 @@ public class TrayManager : IDisposable
             float y = (size - textSize.Height) / 2f;
             
             graphics.DrawString(text, font, brush, x, y);
+        }
+
+        // Draw status border
+        using (var borderPen = new Pen(isEnabled ? Color.FromArgb(76, 175, 80) : Color.FromArgb(244, 67, 54), 1))
+        {
+            graphics.DrawRectangle(borderPen, 0, 0, size - 1, size - 1);
         }
 
         var oldIcon = _notifyIcon.Icon;
@@ -162,9 +174,7 @@ public class TrayManager : IDisposable
         {
             g.FillRectangle(Brushes.Gray, 0, 0, size, size);
         }
-        
-        // Draw a subtle border around the flag
-        g.DrawRectangle(Pens.Gray, 0, 0, size - 1, size - 1);
+        // Border is drawn in UpdateTrayIcon
     }
 
     private ContextMenuStrip CreateContextMenu()
