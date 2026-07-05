@@ -11,7 +11,8 @@ SolidCompression=yes
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 UninstallDisplayIcon={app}\LayoutFix.exe
-
+AppMutex=LayoutFix_SingleInstance_Mutex
+CloseApplications=force
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
 Name: "autostart"; Description: "Run LayoutFix automatically when Windows starts"; GroupDescription: "System integration:"
@@ -31,4 +32,22 @@ Name: "{userstartup}\LayoutFix"; Filename: "{app}\LayoutFix.exe"; Tasks: autosta
 Filename: "{app}\LayoutFix.exe"; Description: "Launch LayoutFix now"; Flags: nowait postinstall skipifsilent
 
 [Code]
-// Code section can be used for custom logic if needed
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  if CurStep = ssInstall then
+  begin
+    Exec('taskkill.exe', '/F /IM LayoutFix.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ResultCode: Integer;
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    Exec('taskkill.exe', '/F /IM LayoutFix.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+end;
