@@ -25,7 +25,7 @@ internal static class Program
             return;
         }
 
-        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        Application.SetHighDpiMode(HighDpiMode.DpiUnawareGdiScaled);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
@@ -43,7 +43,8 @@ internal static class Program
             if (locService != null) locService.SetCulture(settingsService.Current.UiLanguage);
             if (autoStartService != null && autoStartService.IsAutoStartEnabled != settingsService.Current.AutoStart)
             {
-                autoStartService.IsAutoStartEnabled = settingsService.Current.AutoStart;
+                settingsService.Current.AutoStart = autoStartService.IsAutoStartEnabled;
+                settingsService.Save(settingsService.Current);
             }
         }
 
