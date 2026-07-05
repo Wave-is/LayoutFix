@@ -94,6 +94,16 @@ public class AutoConversionService : IDisposable
         if (word.Length < 2) return;
 
         string currentLayout = Win32.GetActiveLayoutCode();
+        try
+        {
+            var cultureInfo = new System.Globalization.CultureInfo(currentLayout);
+            if (_settingsService.Current.DisabledLanguages.Contains(cultureInfo.EnglishName))
+            {
+                _logger.LogInfo($"Auto-conversion disabled for language: {cultureInfo.EnglishName}");
+                return;
+            }
+        }
+        catch { }
         
         bool isGibberish = _dictionaryAnalyzer.IsGibberish(word, currentLayout);
         _logger.LogInfo($"Current layout: {currentLayout}, IsGibberish: {isGibberish}");

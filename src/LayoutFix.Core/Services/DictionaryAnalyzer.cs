@@ -18,44 +18,44 @@ public class DictionaryAnalyzer : IDictionaryAnalyzer
         _layoutConverter = layoutConverter;
         _layoutManager = layoutManager;
         _settingsService = settingsService;
-        
-        LoadAllDictionaries();
     }
 
-    private void LoadAllDictionaries()
+    private void EnsureDictionaryLoaded(string langCode)
     {
-        string dictDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Dictionaries");
-        if (!Directory.Exists(dictDir)) return;
+        if (_dictionaries.ContainsKey(langCode)) return;
 
-        foreach (var file in Directory.GetFiles(dictDir, "*.txt"))
+        var hashSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Exceptions for short words
+        if (langCode == "ru" || langCode == "uk")
         {
-            string langCode = Path.GetFileNameWithoutExtension(file).ToLower();
-            var hashSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            
+            var ruExceptions = new[] { "но", "не", "да", "он", "мы", "вы", "ты", "же", "то", "за", "на", "по", "до", "из", "от", "об", "со", "ко", "их", "им" };
+            foreach (var w in ruExceptions) hashSet.Add(w);
+        }
+        else if (langCode == "en")
+        {
+            var enExceptions = new[] { "hi", "no", "ok", "to", "in", "is", "it", "if", "of", "on", "or", "as", "at", "by", "do", "go", "me", "my", "so", "up", "us", "we", "he", "be", "am", "an" };
+            foreach (var w in enExceptions) hashSet.Add(w);
+        }
+
+        string file = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Dictionaries", $"{langCode}.txt");
+        if (File.Exists(file))
+        {
             try
             {
                 foreach (var line in File.ReadLines(file))
                 {
                     if (!string.IsNullOrWhiteSpace(line))
-                        hashSet.Add(line.Trim());
+                    {
+                        var word = line.Split(' ')[0].Trim(); // Handle cases where there is a frequency number after space
+                        if (!string.IsNullOrEmpty(word)) hashSet.Add(word);
+                    }
                 }
-                
-                // Exceptions for short words
-                if (langCode == "ru" || langCode == "uk")
-                {
-                    var ruExceptions = new[] { "но", "не", "да", "он", "мы", "вы", "ты", "же", "то", "за", "на", "по", "до", "из", "от", "об", "со", "ко", "их", "им" };
-                    foreach (var w in ruExceptions) hashSet.Add(w);
-                }
-                else if (langCode == "en")
-                {
-                    var enExceptions = new[] { "hi", "no", "ok", "to", "in", "is", "it", "if", "of", "on", "or", "as", "at", "by", "do", "go", "me", "my", "so", "up", "us", "we", "he", "be", "am", "an" };
-                    foreach (var w in enExceptions) hashSet.Add(w);
-                }
-
-                _dictionaries[langCode] = hashSet;
             }
             catch { }
         }
+
+        _dictionaries[langCode] = hashSet;
     }
 
     public bool IsGibberish(string word, string currentLayout)
@@ -92,6 +92,7 @@ public class DictionaryAnalyzer : IDictionaryAnalyzer
     private bool IsValidInLayout(string word, string layoutCode)
     {
         string lang = layoutCode.Length >= 2 ? layoutCode.Substring(0, 2).ToLower() : layoutCode.ToLower();
+        EnsureDictionaryLoaded(lang);
         if (_dictionaries.TryGetValue(lang, out var dict))
         {
             return dict.Contains(word);

@@ -1,9 +1,14 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using Microsoft.Win32;
 using LayoutFix.Core.Interfaces;
 using LayoutFix.Core.Models;
+using LayoutFix.UI.Controls;
 
 namespace LayoutFix.UI;
 
@@ -13,12 +18,28 @@ public class SettingsForm : Form
     private readonly IAutoStartService _autoStartService;
     private readonly ILocalizationService _locService;
     private AppSettings _currentSettings;
-    
-    private CheckBox _chkAutoStart = null!;
-    private CheckBox _chkSound = null!;
-    private CheckBox _chkUseFlagIcons = null!;
-    private ListBox _lstExceptions = null!;
-    private DataGridView _gridHotkeys = null!;
+
+    // UI Panels
+    private Panel _pnlTopBar = null!;
+    private Panel _pnlSidebar = null!;
+    private Panel _pnlContent = null!;
+    private Button _activeTabButton = null!;
+    private Button _btnGeneral = null!;
+
+    // Tabs
+    private Panel _tabGeneral = null!;
+    private Panel _tabLanguages = null!;
+    private Panel _tabHotkeys = null!;
+    private Panel _tabExceptions = null!;
+    private Panel _tabDict = null!;
+    private Panel _tabTranslate = null!;
+    private Panel _tabAbout = null!;
+
+    // Form settings
+    private Color _bgColor = Color.FromArgb(28, 28, 30);
+    private Color _sidebarColor = Color.FromArgb(35, 35, 38);
+    private Color _textColor = Color.White;
+    private Color _accentColor = Color.FromArgb(0, 120, 215);
 
     public SettingsForm(ISettingsService settingsService, IAutoStartService autoStartService, ILocalizationService locService)
     {
@@ -26,393 +47,801 @@ public class SettingsForm : Form
         _autoStartService = autoStartService;
         _locService = locService;
         _currentSettings = _settingsService.Current;
-        
+
         InitializeComponent();
         this.Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        ApplyTheme();
+    }
+
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        _btnGeneral?.PerformClick();
     }
 
     private void InitializeComponent()
     {
-        this.Text = _locService.GetString("Settings_Title", "LayoutFix - Settings");
-        this.Size = new Size(650, 450);
+        this.Text = _locService.GetString("Settings_Title", "LayoutFix");
+        this.Size = new Size(850, 600);
         this.StartPosition = FormStartPosition.CenterScreen;
-        this.Icon = CreateAppIcon();
+        this.Font = new Font("Segoe UI", 10F);
+        this.FormBorderStyle = FormBorderStyle.None;
+        this.BackColor = _bgColor;
 
-        var tabControl = new TabControl { Dock = DockStyle.Fill };
+        _pnlTopBar = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = Color.Transparent };
+        _pnlTopBar.MouseDown += PnlTopBar_MouseDown;
         
-        var tabHotkeys = new TabPage(_locService.GetString("Settings_Hotkeys", "Hotkeys"));
-        InitializeHotkeysTab(tabHotkeys);
+        var lblTitle = new Label { Text = "LayoutFix", ForeColor = _textColor, Font = new Font("Segoe UI", 12F, FontStyle.Bold), AutoSize = true, Location = new Point(20, 10) };
+        lblTitle.MouseDown += PnlTopBar_MouseDown;
 
-        var tabExceptions = new TabPage(_locService.GetString("Settings_Exceptions", "Exceptions"));
-        InitializeExceptionsTab(tabExceptions);
+        var btnClose = new Button { Text = "✕", ForeColor = _textColor, FlatStyle = FlatStyle.Flat, Dock = DockStyle.Right, Width = 40, Cursor = Cursors.Hand };
+        btnClose.FlatAppearance.BorderSize = 0;
+        btnClose.Click += (s, e) => this.Close();
 
-        var tabDict = new TabPage(_locService.GetString("Settings_Dict", "Dictionary"));
-        InitializeDictionaryTab(tabDict);
+        _pnlTopBar.Controls.Add(lblTitle);
+        _pnlTopBar.Controls.Add(btnClose);
 
-        var tabGeneral = new TabPage(_locService.GetString("Settings_General", "General"));
-        InitializeGeneralTab(tabGeneral);
+        _pnlSidebar = new Panel
+        {
+            Dock = DockStyle.Left,
+            Width = 220,
+            BackColor = _sidebarColor,
+            Padding = new Padding(0, 20, 0, 0)
+        };
 
-        var tabAbout = new TabPage(_locService.GetString("Settings_About", "About"));
-        InitializeAboutTab(tabAbout);
+        _pnlContent = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = _bgColor,
+            Padding = new Padding(30)
+        };
 
-        tabControl.TabPages.Add(tabHotkeys);
-        tabControl.TabPages.Add(tabExceptions);
-        tabControl.TabPages.Add(tabDict);
-        tabControl.TabPages.Add(tabGeneral);
-        tabControl.TabPages.Add(tabAbout);
+        this.Controls.Add(_pnlContent);
+        this.Controls.Add(_pnlSidebar);
+        this.Controls.Add(_pnlTopBar);
 
-        this.Controls.Add(tabControl);
-
-        ThemeManager.ApplyTheme(this);
+        InitializeTabs();
+        InitializeSidebar();
 
         this.FormClosing += (s, e) =>
         {
-            _currentSettings.AutoStart = _chkAutoStart.Checked;
-            _currentSettings.SoundEnabled = _chkSound.Checked;
-            _currentSettings.UseFlagIcons = _chkUseFlagIcons.Checked;
-            
-            _currentSettings.BlacklistedProcesses.Clear();
-            foreach (string proc in _lstExceptions.Items)
-            {
-                _currentSettings.BlacklistedProcesses.Add(proc);
-            }
-            
-            if (_lstUserExceptions != null)
-            {
-                _currentSettings.UserExceptions.Clear();
-                foreach (string w in _lstUserExceptions.Items) _currentSettings.UserExceptions.Add(w);
-            }
-            
-            _settingsService.Save(_currentSettings);
-            _autoStartService.IsAutoStartEnabled = _currentSettings.AutoStart;
+            SaveSettings();
         };
     }
 
-    private void InitializeHotkeysTab(TabPage tab)
+    private void SaveSettings()
     {
-        var label = new Label
+        _settingsService.Save(_currentSettings);
+        _autoStartService.IsAutoStartEnabled = _currentSettings.AutoStart;
+    }
+
+    private void ApplyTheme()
+    {
+        bool isDark = _currentSettings.AppTheme == "Dark" || (_currentSettings.AppTheme == "Auto" && IsSystemDarkTheme());
+        
+        _bgColor = isDark ? Color.FromArgb(28, 28, 30) : Color.FromArgb(243, 243, 243);
+        _sidebarColor = isDark ? Color.FromArgb(35, 35, 38) : Color.FromArgb(230, 230, 230);
+        _textColor = isDark ? Color.White : Color.Black;
+
+        this.BackColor = _bgColor;
+        _pnlSidebar.BackColor = _sidebarColor;
+        _pnlContent.BackColor = _bgColor;
+
+        UpdateThemeRecursive(this);
+
+        if (_activeTabButton != null)
         {
-            Text = "Выберите действие. Для отключения/включения комбинации кликните по ней правой кнопкой мыши.",
-            Dock = DockStyle.Top,
-            Height = 30,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Padding = new Padding(5, 0, 0, 0)
-        };
-        tab.Controls.Add(label);
+            _activeTabButton.BackColor = _accentColor;
+            _activeTabButton.ForeColor = Color.White;
+        }
+    }
 
-        _gridHotkeys = new DataGridView
+    private void UpdateThemeRecursive(Control parent)
+    {
+        foreach (Control c in parent.Controls)
         {
-            Dock = DockStyle.Fill,
-            AllowUserToAddRows = false,
-            AllowUserToDeleteRows = false,
-            AllowUserToResizeRows = false,
-            ReadOnly = true,
-            SelectionMode = DataGridViewSelectionMode.CellSelect,
-            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-            RowHeadersVisible = false,
-            BackgroundColor = SystemColors.Window,
-            BorderStyle = BorderStyle.None
-        };
-
-        _gridHotkeys.Columns.Add("Action", "Действие");
-        _gridHotkeys.Columns.Add("Set1", "Набор 1 (Scroll Lock)");
-        _gridHotkeys.Columns.Add("Set2", "Набор 2 (Pause)");
-        _gridHotkeys.Columns.Add("Set3", "Набор 3 (Тильда)");
-
-        _gridHotkeys.EnableHeadersVisualStyles = false;
-        _gridHotkeys.ColumnHeadersDefaultCellStyle.BackColor = Color.LightBlue;
-        _gridHotkeys.ColumnHeadersDefaultCellStyle.SelectionBackColor = Color.LightBlue;
-
-        // Add 4 actions exactly as requested, we have 2 FixLayout variants.
-        // Let's manually group them to look like the Punto Switcher screenshot.
-        AddHotkeyRow("FixLayout (Word)", "Отменить конвертацию раскладки", "FixLayout", "Scroll", "Pause", "Ctrl+`");
-        AddHotkeyRow("FixLayout (Selected)", "Сменить раскладку выделенного текста", "FixLayout", "Shift+Scroll", "Shift+Pause", "Ctrl+Shift+`");
-        AddHotkeyRow("ChangeCase", "Сменить регистр выделенного текста", "ChangeCase", "Alt+Scroll", "Alt+Pause", "Alt+`");
-        AddHotkeyRow("Transliterate", "Транслитерировать выделенный текст", "Transliterate", "Ctrl+Alt+Scroll", "Ctrl+Alt+Pause", "Ctrl+Alt+`");
-
-        _gridHotkeys.CellMouseClick += (s, e) =>
-        {
-            if (e.Button == MouseButtons.Right && e.RowIndex >= 0 && e.ColumnIndex >= 1)
+            if (c is CardPanel card)
             {
-                var cell = _gridHotkeys.Rows[e.RowIndex].Cells[e.ColumnIndex];
-                if (cell.Tag is HotkeyConfig config)
+                card.CardBackColor = _bgColor == Color.FromArgb(28, 28, 30) ? Color.FromArgb(35, 35, 35) : Color.White;
+                card.CardBorderColor = _bgColor == Color.FromArgb(28, 28, 30) ? Color.FromArgb(60, 60, 60) : Color.LightGray;
+                card.Invalidate();
+            }
+            else if (c is ToggleSwitch ts)
+            {
+                if (c.Parent is CardPanel) ts.BackColor = (c.Parent as CardPanel)!.CardBackColor;
+                else ts.BackColor = _bgColor;
+                ts.Invalidate();
+            }
+            else if (c is Label lbl && lbl.ForeColor != _accentColor)
+            {
+                lbl.ForeColor = lbl.Font.Bold ? _textColor : (lbl.Text.StartsWith("Keyboard:") || lbl.Text.StartsWith("v1.0") ? Color.Gray : _textColor);
+            }
+            else if (c is Button btn)
+            {
+                if (btn.Parent == _pnlSidebar && btn != _activeTabButton)
                 {
-                    config.Enabled = !config.Enabled;
-                    UpdateCellAppearance(cell, config.Enabled);
-                    _gridHotkeys.ClearSelection();
+                    btn.ForeColor = _bgColor == Color.FromArgb(28, 28, 30) ? Color.DarkGray : Color.DimGray;
                 }
+                else if (btn.Parent == _pnlTopBar)
+                {
+                    btn.ForeColor = _textColor;
+                }
+            }
+            else if (c is ComboBox cb)
+            {
+                cb.BackColor = _sidebarColor;
+                cb.ForeColor = _textColor;
+            }
+            else if (c is ListBox lb)
+            {
+                lb.BackColor = _sidebarColor;
+                lb.ForeColor = _textColor;
+            }
+            else if (c is TextBox tb && !tb.ReadOnly)
+            {
+                tb.BackColor = _sidebarColor;
+                tb.ForeColor = _textColor;
+                tb.BorderStyle = BorderStyle.FixedSingle;
+            }
+            else if (c is TableLayoutPanel tlp)
+            {
+                tlp.ForeColor = _textColor;
+                tlp.BackColor = _bgColor;
+            }
+
+            if (c.HasChildren) UpdateThemeRecursive(c);
+        }
+    }
+
+    private bool IsSystemDarkTheme()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            var val = key?.GetValue("AppsUseLightTheme");
+            if (val != null && val is int i) return i == 0;
+        }
+        catch { }
+        return true;
+    }
+
+    private void InitializeSidebar()
+    {
+        _btnGeneral = AddSidebarButton("⚙️ " + _locService.GetString("Settings_General", "Settings"), _tabGeneral);
+        AddSidebarButton("🌐 " + _locService.GetString("Settings_Languages", "Languages"), _tabLanguages);
+        AddSidebarButton("⌨️ " + _locService.GetString("Settings_Hotkeys", "Hotkeys"), _tabHotkeys);
+        AddSidebarButton("🛡️ " + _locService.GetString("Settings_Exceptions", "Exceptions"), _tabExceptions);
+        AddSidebarButton("📖 " + _locService.GetString("Settings_Dict", "Dictionary"), _tabDict);
+        AddSidebarButton("🌍 " + _locService.GetString("Settings_Translate", "Auto-Translate"), _tabTranslate);
+        AddSidebarButton("ℹ️ " + _locService.GetString("Settings_About", "About"), _tabAbout);
+    }
+
+    private Button AddSidebarButton(string text, Panel targetPanel)
+    {
+        var btn = new Button
+        {
+            Text = "  " + text,
+            Dock = DockStyle.Top,
+            Height = 50,
+            FlatStyle = FlatStyle.Flat,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font = new Font("Segoe UI", 11F, FontStyle.Regular),
+            ForeColor = Color.DarkGray,
+            Cursor = Cursors.Hand,
+            BackColor = Color.Transparent
+        };
+        btn.FlatAppearance.BorderSize = 0;
+
+        btn.Click += (s, e) =>
+        {
+            foreach (Control c in _pnlContent.Controls) c.Visible = false;
+            foreach (Control c in _pnlSidebar.Controls)
+            {
+                if (c is Button b && b.Parent == _pnlSidebar)
+                {
+                    b.ForeColor = _bgColor == Color.FromArgb(28, 28, 30) ? Color.DarkGray : Color.DimGray;
+                    b.BackColor = Color.Transparent;
+                    b.Font = new Font("Segoe UI", 11F, FontStyle.Regular);
+                }
+            }
+            
+            targetPanel.Visible = true;
+            targetPanel.BringToFront();
+
+            btn.ForeColor = Color.White;
+            btn.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
+            btn.BackColor = _accentColor;
+            _activeTabButton = btn;
+        };
+
+        _pnlSidebar.Controls.Add(btn);
+        btn.BringToFront();
+        return btn;
+    }
+
+    private void InitializeTabs()
+    {
+        _tabGeneral = CreateTabPanel();
+        _tabLanguages = CreateTabPanel();
+        _tabHotkeys = CreateTabPanel();
+        _tabExceptions = CreateTabPanel();
+        _tabDict = CreateTabPanel();
+        _tabTranslate = CreateTabPanel();
+        _tabAbout = CreateTabPanel();
+
+        BuildGeneralTab();
+        BuildLanguagesTab();
+        BuildHotkeysTab();
+        BuildExceptionsTab();
+        BuildDictionaryTab();
+        BuildTranslateTab();
+        BuildAboutTab();
+
+        _pnlContent.Controls.AddRange(new[] { _tabGeneral, _tabLanguages, _tabHotkeys, _tabExceptions, _tabDict, _tabTranslate, _tabAbout });
+    }
+
+    private Panel CreateTabPanel()
+    {
+        return new Panel { Dock = DockStyle.Fill, Visible = false };
+    }
+
+    private void BuildGeneralTab()
+    {
+        var pnl = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+
+        int y = 0;
+        var lblTitle = new Label { Text = _locService.GetString("Settings_General", "App Settings"), ForeColor = _textColor, Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Location = new Point(0, y) };
+        pnl.Controls.Add(lblTitle);
+        y += 50;
+
+        pnl.Controls.Add(CreateToggleSetting("Automatic Conversion", _currentSettings.AutoConversionEnabled, v => { _currentSettings.AutoConversionEnabled = v; SaveSettings(); }, y)); y += 50;
+        pnl.Controls.Add(CreateToggleSetting("Start on Boot", _currentSettings.AutoStart, v => { _currentSettings.AutoStart = v; SaveSettings(); }, y)); y += 50;
+        pnl.Controls.Add(CreateToggleSetting("Enable Sound Notifications", _currentSettings.SoundEnabled, v => { _currentSettings.SoundEnabled = v; SaveSettings(); }, y)); y += 50;
+        pnl.Controls.Add(CreateToggleSetting("Show Country Flags in Tray", _currentSettings.UseFlagIcons, v => { _currentSettings.UseFlagIcons = v; SaveSettings(); }, y)); y += 50;
+
+        var pnlTheme = new Panel { Width = 500, Height = 40, Location = new Point(0, y) };
+        var lblTheme = new Label { Text = "Color Theme", ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
+        var cmbTheme = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(350, 8), BackColor = _sidebarColor, ForeColor = _textColor };
+        cmbTheme.Items.AddRange(new[] { "Auto", "Light", "Dark" });
+        cmbTheme.SelectedIndex = _currentSettings.AppTheme switch { "Dark" => 2, "Light" => 1, _ => 0 };
+        cmbTheme.SelectedIndexChanged += (s, e) =>
+        {
+            _currentSettings.AppTheme = cmbTheme.SelectedIndex switch { 2 => "Dark", 1 => "Light", _ => "Auto" };
+            SaveSettings();
+            ApplyTheme();
+        };
+
+        pnlTheme.Controls.Add(lblTheme);
+        pnlTheme.Controls.Add(cmbTheme);
+        pnl.Controls.Add(pnlTheme);
+        y += 50;
+
+        var pnlLang = new Panel { Width = 500, Height = 40, Location = new Point(0, y) };
+        var lblLang = new Label { Text = "Interface Language", ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
+        var cmbLang = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(350, 8), BackColor = _sidebarColor, ForeColor = _textColor };
+        
+        var locales = new[] {
+            new { Code="en", Name="English" }, new { Code="ru", Name="Русский" }, new { Code="uk", Name="Українська" },
+            new { Code="de", Name="Deutsch" }, new { Code="pl", Name="Polski" }, new { Code="es", Name="Español" },
+            new { Code="cs", Name="Čeština" }, new { Code="fr", Name="Français" }, new { Code="it", Name="Italiano" },
+            new { Code="tr", Name="Türkçe" }, new { Code="kk", Name="Қазақ тілі" }, new { Code="ka", Name="ქართული" },
+            new { Code="sr", Name="Српски" }, new { Code="hy", Name="Հայերեն" }, new { Code="he", Name="עברית" },
+            new { Code="ro", Name="Română" }, new { Code="sk", Name="Slovenčina" }, new { Code="nl", Name="Nederlands" },
+            new { Code="bg", Name="Български" }, new { Code="el", Name="Ελληνικά" }, new { Code="th", Name="ไทย" },
+            new { Code="pt", Name="Português" }
+        };
+        cmbLang.DataSource = locales;
+        cmbLang.DisplayMember = "Name";
+        cmbLang.ValueMember = "Code";
+        cmbLang.SelectedValue = _currentSettings.UiLanguage;
+        
+        cmbLang.SelectedIndexChanged += (s, e) =>
+        {
+            if (cmbLang.SelectedValue is string code && _currentSettings.UiLanguage != code)
+            {
+                _currentSettings.UiLanguage = code;
+                _locService.SetCulture(code);
+                SaveSettings();
+                MessageBox.Show("Language changed. Please restart the application to apply all changes.", "Restart Required", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         };
 
-        _gridHotkeys.ColumnHeaderMouseClick += (s, e) =>
+        pnlLang.Controls.Add(lblLang);
+        pnlLang.Controls.Add(cmbLang);
+        pnl.Controls.Add(pnlLang);
+
+        _tabGeneral.Controls.Add(pnl);
+    }
+
+    private Panel CreateToggleSetting(string title, bool initialValue, Action<bool> onChanged, int y)
+    {
+        var pnl = new Panel { Width = 500, Height = 40, Location = new Point(0, y) };
+        var lbl = new Label { Text = title, ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
+        var sw = new ToggleSwitch { Checked = initialValue, Location = new Point(450, 5), BackColor = _bgColor };
+        sw.CheckedChanged += (s, e) => onChanged(sw.Checked);
+        
+        pnl.Controls.Add(lbl);
+        pnl.Controls.Add(sw);
+        return pnl;
+    }
+
+    private void BuildLanguagesTab()
+    {
+        var pnl = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+
+        var lblTitle = new Label { Text = _locService.GetString("Settings_Languages", "Language & Keyboard Layouts"), ForeColor = _textColor, Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Location = new Point(0, 0) };
+        
+        pnl.Controls.Add(lblTitle);
+
+        var activeKeyboardLayoutIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
         {
-            if (e.Button == MouseButtons.Right && e.ColumnIndex >= 1)
+            using var preloadKey = Registry.CurrentUser.OpenSubKey(@"Keyboard Layout\Preload");
+            if (preloadKey != null)
             {
-                int preset = e.ColumnIndex;
-                var configsForPreset = _currentSettings.HotkeyConfigs.Where(c => c.Preset == preset).ToList();
-                if (configsForPreset.Any())
+                foreach (string valName in preloadKey.GetValueNames())
                 {
-                    bool allEnabled = configsForPreset.All(c => c.Enabled);
-                    bool newState = !allEnabled;
-                    
-                    foreach (var config in configsForPreset)
+                    string? hklStr = preloadKey.GetValue(valName)?.ToString();
+                    if (!string.IsNullOrEmpty(hklStr))
                     {
-                        config.Enabled = newState;
-                    }
-                    
-                    foreach (DataGridViewRow row in _gridHotkeys.Rows)
-                    {
-                        var cell = row.Cells[e.ColumnIndex];
-                        if (cell.Tag is HotkeyConfig cfg)
+                        // Match either the whole string or the lower 4 bytes to handle d0010419 etc
+                        activeKeyboardLayoutIds.Add(hklStr.TrimStart('0').ToLower());
+                        if (hklStr.Length >= 4)
                         {
-                            UpdateCellAppearance(cell, cfg.Enabled);
+                            activeKeyboardLayoutIds.Add(hklStr.Substring(hklStr.Length - 4).ToLower());
                         }
                     }
                 }
             }
-        };
+        }
+        catch { }
 
-        _gridHotkeys.CellDoubleClick += (s, e) =>
+        int y = 50;
+
+        foreach (InputLanguage lang in InputLanguage.InstalledInputLanguages)
         {
-            if (e.RowIndex >= 0 && e.ColumnIndex >= 1)
+            // Filter ghost layouts from GetKeyboardLayoutList using Preload registry
+            string handleHex = ((long)lang.Handle & 0xFFFFFFFF).ToString("x8").ToLower();
+            string shortHandle = handleHex.Substring(4);
+            
+            if (activeKeyboardLayoutIds.Count > 0 && 
+                !activeKeyboardLayoutIds.Contains(handleHex) && 
+                !activeKeyboardLayoutIds.Contains(handleHex.TrimStart('0')) &&
+                !activeKeyboardLayoutIds.Contains(shortHandle))
             {
-                var cell = _gridHotkeys.Rows[e.RowIndex].Cells[e.ColumnIndex];
-                if (cell.Tag is HotkeyConfig config)
-                {
-                    using var editor = new HotkeyEditorForm(config.Hotkey);
-                    if (editor.ShowDialog(this) == DialogResult.OK)
-                    {
-                        config.Hotkey = editor.ResultHotkey;
-                        cell.Value = config.Hotkey;
-                    }
-                }
+                continue;
             }
+
+            string name = lang.Culture?.EnglishName ?? lang.LayoutName;
+            bool isActive = !_currentSettings.DisabledLanguages.Contains(name);
+
+            var card = new CardPanel { Width = 500, Height = 70, Location = new Point(0, y) };
+            
+            var lblName = new Label { Text = name, ForeColor = _textColor, Font = new Font("Segoe UI", 12, FontStyle.Bold), AutoSize = true, Location = new Point(60, 15), BackColor = Color.Transparent };
+            var lblLayout = new Label { Text = "Keyboard: " + lang.LayoutName, ForeColor = Color.Gray, Font = new Font("Segoe UI", 9), AutoSize = true, Location = new Point(60, 38), BackColor = Color.Transparent };
+
+            var sw = new ToggleSwitch { Checked = isActive, Location = new Point(430, 22), BackColor = card.CardBackColor };
+            sw.CheckedChanged += (s, e) =>
+            {
+                if (sw.Checked) _currentSettings.DisabledLanguages.Remove(name);
+                else if (!_currentSettings.DisabledLanguages.Contains(name)) _currentSettings.DisabledLanguages.Add(name);
+                SaveSettings();
+            };
+
+            var lblActive = new Label { Text = "Active", ForeColor = _accentColor, Font = new Font("Segoe UI", 10), AutoSize = true, Location = new Point(370, 25), BackColor = Color.Transparent };
+            
+            var pnlFlag = new Panel { Width = 30, Height = 20, Location = new Point(15, 25), BackColor = Color.LightGray };
+
+            card.Controls.AddRange(new Control[] { pnlFlag, lblName, lblLayout, lblActive, sw });
+            pnl.Controls.Add(card);
+            y += 80;
+        }
+
+        _tabLanguages.Controls.Add(pnl);
+    }
+
+    private void BuildHotkeysTab()
+    {
+        var pnl = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+        var lblTitle = new Label { Text = _locService.GetString("Settings_Hotkeys", "Global Shortcuts"), ForeColor = _textColor, Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Top };
+        
+        var tlp = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 7,
+            RowCount = 9,
+            CellBorderStyle = TableLayoutPanelCellBorderStyle.Single,
+            Padding = new Padding(0, 10, 0, 0)
         };
+        
+        typeof(TableLayoutPanel).GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.SetValue(tlp, true, null);
+        
+        tlp.SuspendLayout();
+        
+        tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 31F));
+        tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 23F));
+        tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 35F));
+        tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 23F));
+        tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 35F));
+        tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 23F));
+        tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 35F));
 
-        tab.Controls.Add(_gridHotkeys);
-        _gridHotkeys.BringToFront(); // Bring grid below label
+        // Header Row
+        tlp.Controls.Add(new Label { Text = "Действие", ForeColor = Color.Gray, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
+        tlp.Controls.Add(new Label { Text = "Набор 1", ForeColor = Color.Gray, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 1, 0);
+        
+        var chkAll1 = new CheckBox { CheckAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill, Checked = true };
+        chkAll1.CheckedChanged += (s, e) => ToggleSet(1, chkAll1.Checked, tlp);
+        tlp.Controls.Add(chkAll1, 2, 0);
+        
+        tlp.Controls.Add(new Label { Text = "Набор 2", ForeColor = Color.Gray, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 3, 0);
+        
+        var chkAll2 = new CheckBox { CheckAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill, Checked = true };
+        chkAll2.CheckedChanged += (s, e) => ToggleSet(2, chkAll2.Checked, tlp);
+        tlp.Controls.Add(chkAll2, 4, 0);
+        
+        tlp.Controls.Add(new Label { Text = "Набор 3", ForeColor = Color.Gray, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 5, 0);
+        
+        var chkAll3 = new CheckBox { CheckAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill, Checked = true };
+        chkAll3.CheckedChanged += (s, e) => ToggleSet(3, chkAll3.Checked, tlp);
+        tlp.Controls.Add(chkAll3, 6, 0);
+
+        AddTlpRow(tlp, 1, "FixLayout", "Отменить конвертацию", "Scroll", "Pause", "Ctrl+`");
+        AddTlpRow(tlp, 2, "FixLayoutSelected", "Сменить раскладку (выделенный)", "Shift+Scroll", "Shift+Pause", "Ctrl+Shift+`");
+        AddTlpRow(tlp, 3, "ChangeCase", "Сменить регистр (выделенный)", "Alt+Scroll", "Alt+Pause", "Alt+`");
+        AddTlpRow(tlp, 4, "Transliterate", "Транслитерировать (выделенный)", "Ctrl+Alt+Scroll", "Ctrl+Alt+Pause", "Ctrl+Alt+`");
+        AddTlpRow(tlp, 5, "Translate1", "Перевод в Язык 1", "Alt+Shift+T", "", "");
+        AddTlpRow(tlp, 6, "Translate2", "Перевод в Язык 2 (Англ)", "Alt+T", "", "");
+        AddTlpRow(tlp, 7, "Translate3", "Перевод в Язык 3", "Ctrl+Alt+T", "", "");
+        AddTlpRow(tlp, 8, "OpenTranslator", "Открыть Переводчик", "Ctrl+Shift+T", "", "");
+
+        tlp.ResumeLayout(false);
+        tlp.PerformLayout();
+
+        pnl.Controls.Add(tlp);
+        pnl.Controls.Add(lblTitle);
+        _tabHotkeys.Controls.Add(pnl);
+    }
+    
+    private void AddTlpRow(TableLayoutPanel tlp, int row, string action, string title, string hk1, string hk2, string hk3)
+    {
+        var lbl = new Label { Text = title, ForeColor = _textColor, Font = new Font("Segoe UI", 10), AutoSize = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+        tlp.Controls.Add(lbl, 0, row);
+        
+        AssignTlpCell(tlp, action, hk1, 1, 1, 2, row);
+        AssignTlpCell(tlp, action, hk2, 2, 3, 4, row);
+        AssignTlpCell(tlp, action, hk3, 3, 5, 6, row);
     }
 
-    private void AddHotkeyRow(string key, string title, string action, string hotkey1, string hotkey2, string hotkey3)
+    private void AssignTlpCell(TableLayoutPanel tlp, string action, string expectedHotkey, int preset, int textCol, int chkCol, int row)
     {
-        int r = _gridHotkeys.Rows.Add();
-        var row = _gridHotkeys.Rows[r];
-        row.Cells[0].Value = title;
-
-        AssignHotkeyCell(row.Cells[1], action, hotkey1, 1);
-        AssignHotkeyCell(row.Cells[2], action, hotkey2, 2);
-        AssignHotkeyCell(row.Cells[3], action, hotkey3, 3);
-    }
-
-    private void AssignHotkeyCell(DataGridViewCell cell, string action, string expectedHotkey, int preset)
-    {
-        var config = _currentSettings.HotkeyConfigs.FirstOrDefault(c => c.Action == action && c.Hotkey == expectedHotkey && c.Preset == preset);
+        var config = _currentSettings.HotkeyConfigs.FirstOrDefault(c => c.Action == action && c.Preset == preset);
+        if (config == null && action == "FixLayoutSelected")
+        {
+            config = _currentSettings.HotkeyConfigs.FirstOrDefault(c => c.Action == "FixLayout" && c.Hotkey.Contains("Shift") && c.Preset == preset);
+            if (config != null) config.Action = "FixLayoutSelected";
+        }
         if (config == null)
         {
-            // Create if missing from settings
             config = new HotkeyConfig { Action = action, Hotkey = expectedHotkey, Preset = preset, Enabled = true };
             _currentSettings.HotkeyConfigs.Add(config);
         }
 
-        cell.Value = config.Hotkey;
-        cell.Tag = config;
-        UpdateCellAppearance(cell, config.Enabled);
+        var btn = new Button
+        {
+            Text = config.Hotkey,
+            Dock = DockStyle.Fill,
+            FlatStyle = FlatStyle.Flat,
+            BackColor = _sidebarColor,
+            ForeColor = _textColor,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Cursor = Cursors.Hand,
+            Margin = new Padding(2)
+        };
+        btn.FlatAppearance.BorderSize = 0;
+        btn.Click += (s, e) =>
+        {
+            using var editor = new HotkeyEditorForm(config.Hotkey, action);
+            if (editor.ShowDialog(this) == DialogResult.OK)
+            {
+                config.Hotkey = editor.ResultHotkey;
+                btn.Text = config.Hotkey;
+                SaveSettings();
+            }
+        };
+
+        var chk = new CheckBox { Checked = config.Enabled, CheckAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill, Tag = config };
+        chk.CheckedChanged += (s, e) => { config.Enabled = chk.Checked; SaveSettings(); };
+
+        tlp.Controls.Add(btn, textCol, row);
+        tlp.Controls.Add(chk, chkCol, row);
     }
 
-    private void UpdateCellAppearance(DataGridViewCell cell, bool enabled)
+    private void ToggleSet(int preset, bool enable, TableLayoutPanel tlp)
     {
-        bool isDark = ThemeManager.IsDarkTheme();
-        if (enabled)
+        int chkCol = preset == 1 ? 2 : (preset == 2 ? 4 : 6);
+        for (int r = 1; r < tlp.RowCount; r++)
         {
-            cell.Style.ForeColor = isDark ? Color.White : Color.Black;
-            cell.Style.Font = new Font(_gridHotkeys.Font, FontStyle.Regular);
+            var control = tlp.GetControlFromPosition(chkCol, r);
+            if (control is CheckBox chk)
+            {
+                chk.Checked = enable;
+            }
         }
-        else
+    }
+
+    private ListBox _lstExceptions = null!;
+    private void BuildExceptionsTab()
+    {
+        var pnl = new Panel { Dock = DockStyle.Fill };
+        var lblTitle = new Label { Text = _locService.GetString("Settings_Exceptions", "App Exceptions"), ForeColor = _textColor, Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Top };
+        
+        var pnlAdd = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(0, 10, 0, 0) };
+        var txtAdd = new TextBox { Width = 300, Location = new Point(0, 10), BackColor = _sidebarColor, ForeColor = _textColor, Font = new Font("Segoe UI", 11) };
+        var btnAdd = new Button { Text = "Add", Location = new Point(310, 9), Width = 80, Height = 28, BackColor = _accentColor, ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        btnAdd.FlatAppearance.BorderSize = 0;
+        
+        btnAdd.Click += (s, e) =>
         {
-            cell.Style.ForeColor = isDark ? Color.FromArgb(120, 120, 120) : Color.Gray;
-            cell.Style.Font = new Font(_gridHotkeys.Font, FontStyle.Strikeout);
-        }
+            string w = txtAdd.Text.Trim();
+            if (!string.IsNullOrEmpty(w) && !_currentSettings.BlacklistedProcesses.Contains(w, StringComparer.OrdinalIgnoreCase))
+            {
+                _currentSettings.BlacklistedProcesses.Add(w);
+                _lstExceptions.Items.Add(w);
+                txtAdd.Clear();
+                SaveSettings();
+            }
+        };
+
+        var btnRemove = new Button { Text = "Remove", Location = new Point(400, 9), Width = 80, Height = 28, BackColor = Color.FromArgb(200, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        btnRemove.FlatAppearance.BorderSize = 0;
+        btnRemove.Click += (s, e) =>
+        {
+            if (_lstExceptions.SelectedItem is string w)
+            {
+                _currentSettings.BlacklistedProcesses.Remove(w);
+                _lstExceptions.Items.Remove(w);
+                SaveSettings();
+            }
+        };
+
+        pnlAdd.Controls.AddRange(new Control[] { txtAdd, btnAdd, btnRemove });
+
+        _lstExceptions = new ListBox { Dock = DockStyle.Fill, BackColor = _sidebarColor, ForeColor = _textColor, BorderStyle = BorderStyle.None, Font = new Font("Segoe UI", 12) };
+        foreach (var proc in _currentSettings.BlacklistedProcesses) _lstExceptions.Items.Add(proc);
+
+        var pnlList = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 10, 0, 0) };
+        pnlList.Controls.Add(_lstExceptions);
+
+        pnl.Controls.AddRange(new Control[] { pnlList, pnlAdd, lblTitle });
+        _tabExceptions.Controls.Add(pnl);
     }
 
     private ListBox _lstUserExceptions = null!;
-
-    private void InitializeDictionaryTab(TabPage tab)
+    private TextBox _txtAddDict = null!;
+    private void BuildDictionaryTab()
     {
-        var splitContainer = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, SplitterDistance = 60 };
-        tab.Controls.Add(splitContainer);
+        var pnl = new Panel { Dock = DockStyle.Fill };
+        var lblTitle = new Label { Text = _locService.GetString("Settings_Dict", "Dictionary"), ForeColor = _textColor, Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Top };
+        
+        var pnlAdd = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(0, 10, 0, 0) };
+        _txtAddDict = new TextBox { Width = 300, Location = new Point(0, 10), BackColor = _sidebarColor, ForeColor = _textColor, Font = new Font("Segoe UI", 11) };
+        var btnAdd = new Button { Text = "Add", Location = new Point(310, 9), Width = 80, Height = 28, BackColor = _accentColor, ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        btnAdd.FlatAppearance.BorderSize = 0;
+        
+        btnAdd.Click += (s, e) =>
+        {
+            string w = _txtAddDict.Text.Trim().ToLower();
+            if (!string.IsNullOrEmpty(w) && !_currentSettings.UserExceptions.Contains(w))
+            {
+                _currentSettings.UserExceptions.Add(w);
+                _lstUserExceptions.Items.Add(w);
+                _txtAddDict.Clear();
+                SaveSettings();
+            }
+        };
 
-        var pnlTop = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10) };
-        var txtWord = new TextBox { Width = 200, Location = new Point(10, 20) };
-        var btnAdd = new Button { Text = _locService.GetString("Settings_Add", "Add"), Location = new Point(220, 18), Width = 100 };
-        var btnRemove = new Button { Text = _locService.GetString("Settings_Remove", "Remove"), Location = new Point(330, 18), Width = 100 };
-        pnlTop.Controls.AddRange(new Control[] { new Label { Text = _locService.GetString("Settings_ExceptionWord", "Word to never auto-convert:"), Location = new Point(10, 5), AutoSize = true }, txtWord, btnAdd, btnRemove });
+        var btnRemove = new Button { Text = "Remove", Location = new Point(400, 9), Width = 80, Height = 28, BackColor = Color.FromArgb(200, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        btnRemove.FlatAppearance.BorderSize = 0;
+        btnRemove.Click += (s, e) =>
+        {
+            if (_lstUserExceptions.SelectedItem is string w)
+            {
+                _currentSettings.UserExceptions.Remove(w);
+                _lstUserExceptions.Items.Remove(w);
+                SaveSettings();
+            }
+        };
 
-        _lstUserExceptions = new ListBox { Dock = DockStyle.Fill };
+        pnlAdd.Controls.Add(_txtAddDict);
+        pnlAdd.Controls.Add(btnAdd);
+        pnlAdd.Controls.Add(btnRemove);
+
+        _lstUserExceptions = new ListBox { Dock = DockStyle.Fill, BackColor = _sidebarColor, ForeColor = _textColor, BorderStyle = BorderStyle.None, Font = new Font("Segoe UI", 12) };
         foreach (var w in _currentSettings.UserExceptions) _lstUserExceptions.Items.Add(w);
 
-        btnAdd.Click += (s, e) =>
-        {
-            string w = txtWord.Text.Trim().ToLower();
-            if (!string.IsNullOrEmpty(w) && !_lstUserExceptions.Items.Contains(w))
-            {
-                _lstUserExceptions.Items.Add(w);
-                txtWord.Clear();
+        var pnlList = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 10, 0, 0) };
+        pnlList.Controls.Add(_lstUserExceptions);
+
+        pnl.Controls.Add(pnlList);
+        pnl.Controls.Add(pnlAdd);
+        pnl.Controls.Add(lblTitle);
+        _tabDict.Controls.Add(pnl);
+    }
+
+    private void BuildTranslateTab()
+    {
+        var pnl = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+
+        int y = 0;
+        var lblTitle = new Label { Text = _locService.GetString("Settings_Translate", "Auto-Translate"), ForeColor = _textColor, Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Location = new Point(0, y) };
+        pnl.Controls.Add(lblTitle);
+        y += 40;
+
+        var lblNote = new Label { Text = "⚠️ По умолчанию используется Google Translate (нужен интернет).", ForeColor = Color.Orange, Font = new Font("Segoe UI", 10, FontStyle.Italic), AutoSize = true, Location = new Point(0, y) };
+        pnl.Controls.Add(lblNote);
+        y += 40;
+
+        var tsOffline = CreateToggleSetting("Использовать локальную оффлайн модель (Без интернета)", _currentSettings.UseOfflineTranslation, v => { _currentSettings.UseOfflineTranslation = v; SaveSettings(); }, y);
+        pnl.Controls.Add(tsOffline);
+        y += 50;
+
+        var lblModel = new Label { Text = "Выбор модели:", AutoSize = true, Location = new Point(0, y + 4), ForeColor = _textColor };
+        var cmbModel = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 350, Location = new Point(120, y), BackColor = _sidebarColor, ForeColor = _textColor };
+        cmbModel.Items.Add(new { Id = "light", Name = "Легкая Qwen 0.5B (350 МБ, CPU)" });
+        cmbModel.Items.Add(new { Id = "alma", Name = "Специализированная ALMA 7B (4 ГБ, GPU)" });
+        cmbModel.Items.Add(new { Id = "pro", Name = "Общая Gemma 2B (1.6 ГБ, GPU)" });
+        cmbModel.ValueMember = "Id";
+        cmbModel.DisplayMember = "Name";
+        
+        cmbModel.SelectedIndex = _currentSettings.OfflineModelType == "pro" ? 2 : (_currentSettings.OfflineModelType == "alma" ? 1 : 0);
+        pnl.Controls.Add(lblModel);
+        pnl.Controls.Add(cmbModel);
+        y += 40;
+
+        var downloadService = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<LayoutFix.Core.Services.ModelDownloadService>(AppHost.Services!);
+        
+        var btnDownload = new Button { Width = 200, Height = 30, Location = new Point(0, y), FlatStyle = FlatStyle.Flat, ForeColor = _textColor, BackColor = _sidebarColor };
+        var progressDownload = new ProgressBar { Width = 280, Height = 10, Location = new Point(220, y + 10), Visible = false };
+        
+        Action updateDownloadButton = () => {
+            string modelType = (cmbModel.SelectedItem as dynamic)?.Id ?? "light";
+            string fileName = modelType == "pro" ? "gemma-2b-it-q4_k_m.gguf" : (modelType == "alma" ? "alma-7b.Q4_K_M.gguf" : "qwen2-0_5b-instruct-q4_k_m.gguf");
+            string path = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LayoutFix", "Models", fileName);
+            
+            if (downloadService.IsModelDownloaded(path)) {
+                btnDownload.Text = "Модель скачана";
+                btnDownload.Enabled = false;
+            } else {
+                btnDownload.Text = "Скачать модель";
+                btnDownload.Enabled = true;
             }
         };
 
-        btnRemove.Click += (s, e) =>
-        {
-            if (_lstUserExceptions.SelectedIndex >= 0)
-                _lstUserExceptions.Items.RemoveAt(_lstUserExceptions.SelectedIndex);
+        cmbModel.SelectedIndexChanged += (s, e) => {
+            _currentSettings.OfflineModelType = (cmbModel.SelectedItem as dynamic)?.Id ?? "light";
+            SaveSettings();
+            updateDownloadButton();
         };
-
-        splitContainer.Panel1.Controls.Add(pnlTop);
-        splitContainer.Panel2.Controls.Add(_lstUserExceptions);
-        splitContainer.Panel2.Padding = new Padding(10);
-    }
-
-    private void InitializeExceptionsTab(TabPage tab)
-    {
-        var splitContainer = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, SplitterDistance = 60 };
-        tab.Controls.Add(splitContainer);
-
-        var pnlTop = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10) };
-        var txtProcess = new TextBox { Width = 200, Location = new Point(10, 20) };
-        var btnAdd = new Button { Text = _locService.GetString("Settings_Add", "Add"), Location = new Point(220, 18), Width = 100 };
-        var btnRemove = new Button { Text = _locService.GetString("Settings_Remove", "Remove"), Location = new Point(330, 18), Width = 100 };
-        pnlTop.Controls.AddRange(new Control[] { new Label { Text = _locService.GetString("Settings_ProcessName", "Process name (e.g., devenv.exe):"), Location = new Point(10, 5), AutoSize = true }, txtProcess, btnAdd, btnRemove });
-
-        _lstExceptions = new ListBox { Dock = DockStyle.Fill };
-        foreach (var proc in _currentSettings.BlacklistedProcesses) _lstExceptions.Items.Add(proc);
-
-        btnAdd.Click += (s, e) =>
+        
+        updateDownloadButton();
+        
+        btnDownload.Click += async (s, e) =>
         {
-            string proc = txtProcess.Text.Trim();
-            if (!string.IsNullOrEmpty(proc) && !_lstExceptions.Items.Contains(proc))
+            btnDownload.Enabled = false;
+            progressDownload.Visible = true;
+            btnDownload.Text = "Скачивание...";
+            try
             {
-                _lstExceptions.Items.Add(proc);
-                txtProcess.Clear();
+                string modelType = _currentSettings.OfflineModelType;
+                string url = modelType == "pro" 
+                    ? "https://huggingface.co/lmstudio-ai/gemma-2b-it-GGUF/resolve/main/gemma-2b-it-q4_k_m.gguf"
+                    : (modelType == "alma" ? "https://huggingface.co/TheBloke/ALMA-7B-GGUF/resolve/main/alma-7b.Q4_K_M.gguf" : "https://huggingface.co/Qwen/Qwen2-0.5B-Instruct-GGUF/resolve/main/qwen2-0_5b-instruct-q4_k_m.gguf");
+                    
+                string fileName = modelType == "pro" ? "gemma-2b-it-q4_k_m.gguf" : (modelType == "alma" ? "alma-7b.Q4_K_M.gguf" : "qwen2-0_5b-instruct-q4_k_m.gguf");
+                string path = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LayoutFix", "Models", fileName);
+
+                await downloadService.DownloadModelAsync(url, path, p => {
+                    if (progressDownload.InvokeRequired) progressDownload.Invoke(new Action(() => progressDownload.Value = (int)(p * 100)));
+                    else progressDownload.Value = (int)(p * 100);
+                });
+                updateDownloadButton();
+                progressDownload.Visible = false;
+            }
+            catch (Exception ex)
+            {
+                btnDownload.Text = "Ошибка скачивания";
+                MessageBox.Show("Ошибка скачивания: " + ex.Message);
+                btnDownload.Enabled = true;
             }
         };
 
-        btnRemove.Click += (s, e) =>
-        {
-            if (_lstExceptions.SelectedIndex >= 0)
-                _lstExceptions.Items.RemoveAt(_lstExceptions.SelectedIndex);
+        pnl.Controls.Add(btnDownload);
+        pnl.Controls.Add(progressDownload);
+        y += 50;
+
+        var locales = new[] {
+            new { Code="en", Name="English" }, new { Code="ru", Name="Русский" }, new { Code="uk", Name="Українська" },
+            new { Code="de", Name="Deutsch" }, new { Code="pl", Name="Polski" }, new { Code="es", Name="Español" },
+            new { Code="cs", Name="Čeština" }, new { Code="fr", Name="Français" }, new { Code="it", Name="Italiano" },
+            new { Code="tr", Name="Türkçe" }, new { Code="kk", Name="Қазақ тілі" }, new { Code="ka", Name="ქართული" },
+            new { Code="sr", Name="Српски" }, new { Code="hy", Name="Հայերեն" }, new { Code="he", Name="עברית" },
+            new { Code="ro", Name="Română" }, new { Code="sk", Name="Slovenčina" }, new { Code="nl", Name="Nederlands" },
+            new { Code="bg", Name="Български" }, new { Code="el", Name="Ελληνικά" }, new { Code="th", Name="ไทย" },
+            new { Code="pt", Name="Português" }
         };
 
-        splitContainer.Panel1.Controls.Add(pnlTop);
-        splitContainer.Panel2.Controls.Add(_lstExceptions);
-        splitContainer.Panel2.Padding = new Padding(10);
+        pnl.Controls.Add(CreateLanguageDropdown("Translation Language 1", _currentSettings.TranslateLang1, locales, v => { _currentSettings.TranslateLang1 = v; SaveSettings(); }, ref y));
+        pnl.Controls.Add(CreateLanguageDropdown("Translation Language 2", _currentSettings.TranslateLang2, locales, v => { _currentSettings.TranslateLang2 = v; SaveSettings(); }, ref y));
+        pnl.Controls.Add(CreateLanguageDropdown("Translation Language 3", _currentSettings.TranslateLang3, locales, v => { _currentSettings.TranslateLang3 = v; SaveSettings(); }, ref y));
+
+        _tabTranslate.Controls.Add(pnl);
     }
 
-    private void InitializeGeneralTab(TabPage tab)
+    private Panel CreateLanguageDropdown(string label, string currentVal, object[] locales, Action<string> onChange, ref int y)
     {
-        _chkAutoStart = new CheckBox
-        {
-            Text = _locService.GetString("Settings_AutoStart", "Start with Windows"),
-            AutoSize = true,
-            Location = new Point(20, 20),
-            Checked = _currentSettings.AutoStart
-        };
-
-        _chkSound = new CheckBox
-        {
-            Text = _locService.GetString("Settings_Sound", "Enable sound notifications"),
-            AutoSize = true,
-            Location = new Point(20, 50),
-            Checked = _currentSettings.SoundEnabled
-        };
-
-        _chkUseFlagIcons = new CheckBox
-        {
-            Text = _locService.GetString("Settings_Flags", "Use country flags in tray"),
-            AutoSize = true,
-            Location = new Point(20, 80),
-            Checked = _currentSettings.UseFlagIcons
-        };
-
-        _chkUseFlagIcons.CheckedChanged += (s, e) =>
-        {
-            _currentSettings.UseFlagIcons = _chkUseFlagIcons.Checked;
-            _settingsService.Save(_currentSettings);
-        };
-
-        var chkAutoConversion = new CheckBox
-        {
-            Text = _locService.GetString("Settings_AutoConv", "Enable auto-conversion during typing"),
-            AutoSize = true,
-            Location = new Point(20, 110),
-            Checked = _currentSettings.AutoConversionEnabled
-        };
-
-        chkAutoConversion.CheckedChanged += (s, e) =>
-        {
-            _currentSettings.AutoConversionEnabled = chkAutoConversion.Checked;
-            _settingsService.Save(_currentSettings);
-        };
-
-        tab.Controls.Add(_chkAutoStart);
-        tab.Controls.Add(_chkSound);
-        tab.Controls.Add(_chkUseFlagIcons);
-        tab.Controls.Add(chkAutoConversion);
+        var pnl = new Panel { Width = 500, Height = 40, Location = new Point(0, y) };
+        var lbl = new Label { Text = label, ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
+        var cmb = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(350, 8), BackColor = _sidebarColor, ForeColor = _textColor, DataSource = locales, DisplayMember = "Name", ValueMember = "Code" };
+        
+        cmb.SelectedValue = currentVal;
+        cmb.SelectedIndexChanged += (s, e) => { if (cmb.SelectedValue != null) onChange(cmb.SelectedValue.ToString()!); };
+        
+        pnl.Controls.Add(lbl);
+        pnl.Controls.Add(cmb);
+        y += 50;
+        return pnl;
     }
 
-    private Icon CreateAppIcon()
+    private void BuildAboutTab()
     {
-        int size = 64;
-        using var bmp = new Bitmap(size, size);
-        using var g = Graphics.FromImage(bmp);
-        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-        g.Clear(Color.Transparent);
-
-        using var brush = new SolidBrush(Color.FromArgb(0, 120, 215)); // Windows 10/11 blue
-        g.FillEllipse(brush, 2, 2, size - 4, size - 4);
-
-        using var font = new Font("Segoe UI", 24, FontStyle.Bold);
-        using var textBrush = new SolidBrush(Color.White);
-        var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-        g.DrawString("LF", font, textBrush, new RectangleF(0, 0, size, size + 2), format);
-
-        return Icon.FromHandle(bmp.GetHicon());
-    }
-
-    private void InitializeAboutTab(TabPage tab)
-    {
-        var tlp = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            RowCount = 2,
-            ColumnCount = 1
+        var lblTitle = new Label { Text = _locService.GetString("Settings_About", "About LayoutFix"), ForeColor = _textColor, Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Top };
+        
+        var picLogo = new PictureBox 
+        { 
+            SizeMode = PictureBoxSizeMode.Zoom, 
+            Width = 100, Height = 100, 
+            Location = new Point(0, 50) 
         };
-        tlp.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
-        tlp.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
-
-        var logoPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "logo.png");
+        
+        string logoPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "logo.png");
         if (System.IO.File.Exists(logoPath))
         {
-            var pb = new PictureBox
-            {
-                Image = Image.FromFile(logoPath),
-                SizeMode = PictureBoxSizeMode.Zoom,
-                Dock = DockStyle.Fill,
-                Margin = new Padding(20)
-            };
-            tlp.Controls.Add(pb, 0, 0);
+            picLogo.Image = Image.FromFile(logoPath);
+        }
+        else
+        {
+            picLogo.Image = this.Icon?.ToBitmap();
         }
 
-        var lblAbout = new Label
-        {
-            Text = "LayoutFix v1.0\nA modern alternative to Punto Switcher.\n\nBuilt with .NET 8.",
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.TopCenter,
-            Font = new Font("Segoe UI", 12),
-            Padding = new Padding(0, 20, 0, 0)
-        };
-        tlp.Controls.Add(lblAbout, 0, 1);
+        var lblDesc = new Label { Text = "v1.0 Modern Version\nBuilt with .NET 8.\nAutomatic Layout Converter.", ForeColor = Color.Gray, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(120, 50) };
         
-        tab.Controls.Add(tlp);
+        _tabAbout.Controls.Add(picLogo);
+        _tabAbout.Controls.Add(lblDesc);
+        _tabAbout.Controls.Add(lblTitle);
     }
 
+    [DllImport("user32.dll")]
+    public static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
+    [DllImport("user32.dll")]
+    public static extern bool ReleaseCapture();
+
+    private void PnlTopBar_MouseDown(object? sender, MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left)
+        {
+            ReleaseCapture();
+            SendMessage(Handle, 0xA1, 0x2, 0); // WM_NCLBUTTONDOWN
+        }
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        using (var pen = new Pen(Color.FromArgb(50, 50, 50), 1))
+        {
+            e.Graphics.DrawRectangle(pen, 0, 0, this.Width - 1, this.Height - 1);
+        }
+    }
 }

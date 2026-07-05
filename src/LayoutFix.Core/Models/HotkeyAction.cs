@@ -52,5 +52,10 @@ public enum HotkeyAction
     /// <summary>
     /// Undoes the last operation.
     /// </summary>
-    Undo
+    Undo,
+
+    Translate1,
+    Translate2,
+    Translate3,
+    OpenTranslator
 }

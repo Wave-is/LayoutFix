@@ -125,6 +125,7 @@ public class KeyboardHook : IKeyboardHook
             0x09 => "tab",
             0x13 => "pause",
             0x14 => "capslock",
+            0x91 => "scroll",
             0x2D => "insert",
             0x08 => "backspace",
             0x2E => "delete",

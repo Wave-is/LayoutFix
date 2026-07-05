@@ -14,8 +14,10 @@ public static class ThemeManager
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19;
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 
-    public static bool IsDarkTheme()
+    public static bool IsDarkTheme(string appTheme = "Auto")
     {
+        if (appTheme == "Dark") return true;
+        if (appTheme == "Light") return false;
         try
         {
             var value = Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1);
@@ -27,9 +29,9 @@ public static class ThemeManager
         }
     }
 
-    public static void ApplyTheme(Form form)
+    public static void ApplyTheme(Form form, string appTheme = "Auto")
     {
-        bool isDark = IsDarkTheme();
+        bool isDark = IsDarkTheme(appTheme);
         
         // 1. Title bar
         if (Environment.OSVersion.Version.Major >= 10)
@@ -60,7 +62,11 @@ public static class ThemeManager
 
         foreach (Control control in controls)
         {
-            if (control is Panel || control is TabPage)
+            if (control.GetType().Name == "CardPanel" || control.GetType().Name == "ToggleSwitch")
+            {
+                // Skip custom controls
+            }
+            else if (control is Panel || control is TabPage)
             {
                 control.BackColor = panelBackColor;
                 control.ForeColor = foreColor;

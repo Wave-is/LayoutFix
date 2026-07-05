@@ -7,65 +7,106 @@ namespace LayoutFix.UI;
 
 public class HotkeyEditorForm : Form
 {
+    private Label _lblActionDesc = null!;
+    private TextBox _txtActionName = null!;
+    private GroupBox _gbCombo = null!;
     private Label _lblInstruction = null!;
     private TextBox _txtHotkey = null!;
     private Button _btnSave = null!;
     private Button _btnCancel = null!;
 
     public string ResultHotkey { get; private set; }
+    private readonly string _actionDescription;
 
-    public HotkeyEditorForm(string initialHotkey)
+    public HotkeyEditorForm(string initialHotkey, string actionDescription)
     {
         ResultHotkey = initialHotkey;
+        _actionDescription = actionDescription;
         InitializeComponent();
     }
 
     private void InitializeComponent()
     {
-        this.Text = "Редактирование хоткея";
-        this.Size = new Size(350, 150);
+        this.Text = "Выбор комбинации клавиш";
+        this.Size = new Size(380, 240);
         this.StartPosition = FormStartPosition.CenterParent;
         this.FormBorderStyle = FormBorderStyle.FixedDialog;
         this.MaximizeBox = false;
         this.MinimizeBox = false;
         this.KeyPreview = true;
+        this.Font = new Font("Segoe UI", 9F);
+        this.BackColor = SystemColors.Control;
+
+        _lblActionDesc = new Label
+        {
+            Text = "Действие:",
+            Location = new Point(15, 15),
+            AutoSize = true,
+            ForeColor = SystemColors.ControlDarkDark
+        };
+
+        _txtActionName = new TextBox
+        {
+            Text = _actionDescription,
+            Location = new Point(15, 35),
+            Width = 335,
+            ReadOnly = true,
+            BorderStyle = BorderStyle.None,
+            BackColor = SystemColors.Control,
+            Font = new Font("Segoe UI", 10F)
+        };
+        _txtActionName.GotFocus += (s, e) => this.Focus();
+
+        _gbCombo = new GroupBox
+        {
+            Text = "Комбинация",
+            Location = new Point(15, 70),
+            Size = new Size(335, 80)
+        };
 
         _lblInstruction = new Label
         {
-            Text = "Нажмите новую комбинацию клавиш:",
-            Location = new Point(20, 15),
-            AutoSize = true
+            Text = "Установите курсор в поле и нажмите нужные клавиши:",
+            Location = new Point(15, 20),
+            AutoSize = true,
+            ForeColor = SystemColors.ControlDarkDark
         };
 
         _txtHotkey = new TextBox
         {
             Text = ResultHotkey,
-            Location = new Point(20, 40),
-            Width = 290,
+            Location = new Point(15, 45),
+            Width = 300,
             ReadOnly = true,
-            BackColor = SystemColors.Window
+            BackColor = SystemColors.Window,
+            Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+            Cursor = Cursors.IBeam
         };
-        // Disable focusing to avoid caret blinking and standard typing, we intercept keys at Form level
-        _txtHotkey.GotFocus += (s, e) => this.Focus();
+
+        _gbCombo.Controls.Add(_lblInstruction);
+        _gbCombo.Controls.Add(_txtHotkey);
 
         _btnSave = new Button
         {
             Text = "ОК",
-            Location = new Point(150, 75),
+            Location = new Point(190, 165),
             Width = 75,
+            Height = 28,
             DialogResult = DialogResult.OK
         };
 
         _btnCancel = new Button
         {
             Text = "Отмена",
-            Location = new Point(235, 75),
+            Location = new Point(275, 165),
             Width = 75,
+            Height = 28,
             DialogResult = DialogResult.Cancel
         };
 
-        this.Controls.Add(_lblInstruction);
-        this.Controls.Add(_txtHotkey);
+        this.Controls.Add(_lblActionDesc);
+        this.Controls.Add(_txtActionName);
+        this.Controls.Add(_gbCombo);
         this.Controls.Add(_btnSave);
         this.Controls.Add(_btnCancel);
 

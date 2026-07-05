@@ -15,9 +15,17 @@ public class LocalizationService : ILocalizationService
         LoadLocalization();
     }
 
-    private void LoadLocalization()
+    public void SetCulture(string culture)
     {
-        string currentCulture = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.ToLower();
+        LoadLocalization(culture);
+    }
+
+    private void LoadLocalization(string? currentCulture = null)
+    {
+        if (string.IsNullOrEmpty(currentCulture))
+        {
+            currentCulture = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.ToLower();
+        }
         string localesDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "locales");
         
         // Try to load current culture, fallback to 'en', then fallback to whatever exists

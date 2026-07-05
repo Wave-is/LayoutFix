@@ -36,10 +36,12 @@ internal static class Program
         var coordinator = AppHost.Services?.GetRequiredService<IHotkeyCoordinator>();
         var settingsService = AppHost.Services?.GetRequiredService<ISettingsService>();
         var autoStartService = AppHost.Services?.GetRequiredService<IAutoStartService>();
+        var locService = AppHost.Services?.GetRequiredService<ILocalizationService>();
 
-        if (settingsService != null && autoStartService != null)
+        if (settingsService != null)
         {
-            if (autoStartService.IsAutoStartEnabled != settingsService.Current.AutoStart)
+            if (locService != null) locService.SetCulture(settingsService.Current.UiLanguage);
+            if (autoStartService != null && autoStartService.IsAutoStartEnabled != settingsService.Current.AutoStart)
             {
                 autoStartService.IsAutoStartEnabled = settingsService.Current.AutoStart;
             }

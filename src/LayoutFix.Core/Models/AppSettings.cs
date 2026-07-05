@@ -7,7 +7,21 @@ public class AppSettings
     public int Version { get; set; } = 3;
     public string HotkeyScheme { get; set; } = "PuntoClassic";
 
-    public List<HotkeyConfig> HotkeyConfigs { get; set; } = new()
+    public string AppTheme { get; set; } = "Dark";
+    public string UiLanguage { get; set; } = "en";
+    public string ConvertKey { get; set; } = "Pause";
+    public string SwitchLayoutKey { get; set; } = "Shift+Pause";
+    public string ChangeCaseKey { get; set; } = "Alt+Pause";
+    public string TransliterateKey { get; set; } = "Ctrl+Alt+P";
+
+    // Auto-translate settings
+    public string TranslateLang1 { get; set; } = "en";
+    public string TranslateLang2 { get; set; } = "ru";
+    public string TranslateLang3 { get; set; } = "uk";
+    
+    public string OfflineModelType { get; set; } = "light"; // "light" or "pro"
+
+    public List<HotkeyConfig> HotkeyConfigs { get; set; } = new List<HotkeyConfig>
     {
         // Set 1 (ScrollLock)
         new() { Action = "FixLayout", Hotkey = "Scroll", Preset = 1, Enabled = true },
@@ -23,7 +37,12 @@ public class AppSettings
         new() { Action = "FixLayout", Hotkey = "Ctrl+`", Preset = 3, Enabled = true },
         new() { Action = "FixLayout", Hotkey = "Ctrl+Shift+`", Preset = 3, Enabled = true },
         new() { Action = "ChangeCase", Hotkey = "Alt+`", Preset = 3, Enabled = true },
-        new() { Action = "Transliterate", Hotkey = "Ctrl+Alt+`", Preset = 3, Enabled = true }
+        new() { Action = "Transliterate", Hotkey = "Ctrl+Alt+`", Preset = 3, Enabled = true },
+        new() { Action = "ConvertToUkrainian", Hotkey = "Ctrl+F8", Preset = 1, Enabled = false },
+        new() { Action = "Translate1", Hotkey = "Alt+Shift+T", Preset = 1, Enabled = true },
+        new() { Action = "Translate2", Hotkey = "Alt+T", Preset = 1, Enabled = true },
+        new() { Action = "Translate3", Hotkey = "Ctrl+Alt+T", Preset = 1, Enabled = true },
+        new() { Action = "OpenTranslator", Hotkey = "Ctrl+Shift+T", Preset = 1, Enabled = true }
     };
 
     public List<string> LayoutOrder { get; set; } = ["en-US", "ru-RU", "uk-UA"];
@@ -35,8 +54,10 @@ public class AppSettings
     public bool UseFlagIcons { get; set; } = true;
     public bool AutoConversionEnabled { get; set; } = true;
     public bool LoggingEnabled { get; set; } = false;
+    public bool UseOfflineTranslation { get; set; } = false;
     public string TransliterationTable { get; set; } = "GOST";
     public List<string> BlacklistedProcesses { get; set; } = ["devenv.exe", "Code.exe", "idea64.exe"];
     public List<string> UserExceptions { get; set; } = new();
     public Dictionary<string, string> UserAutocorrect { get; set; } = new();
+    public List<string> DisabledLanguages { get; set; } = new();
 }

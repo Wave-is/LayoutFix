@@ -19,6 +19,10 @@ public static class AppHost
         var services = new ServiceCollection();
         
         // Infrastructure
+        services.AddSingleton<ITranslationService, TranslationService>();
+        services.AddSingleton<IOfflineTranslationService, OfflineTranslationService>();
+        services.AddSingleton<ITranslationHistoryService, TranslationHistoryService>();
+        services.AddSingleton<ModelDownloadService>();
         services.AddSingleton<ILocalizationService, LocalizationService>();
         services.AddSingleton<ILoggerService, FileLoggerService>();
         services.AddSingleton<ISettingsService, SettingsService>();
@@ -37,6 +41,11 @@ public static class AppHost
         services.AddSingleton<TransliterationService>();
         services.AddSingleton<IHotkeyCoordinator, HotkeyCoordinator>();
         services.AddSingleton<IDictionaryAnalyzer, DictionaryAnalyzer>();
+        services.AddSingleton<ITranslationService, TranslationService>();
+        services.AddSingleton<IPopupService, LayoutFix.Services.PopupService>();
+        services.AddSingleton<ITranslatorWindowProvider, LayoutFix.Services.TranslatorWindowProvider>();
+        services.AddSingleton<LayoutFix.Core.Services.ModelDownloadService>();
+        services.AddSingleton<IOfflineTranslationService, LayoutFix.Core.Services.OfflineTranslationService>();
         services.AddSingleton<IMouseHook, MouseHook>();
         services.AddSingleton<AutoConversionService>();
         

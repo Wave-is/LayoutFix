@@ -126,7 +126,7 @@ public class TrayManager : IDisposable
         }
 
         // Draw status border
-        using (var borderPen = new Pen(isEnabled ? Color.FromArgb(76, 175, 80) : Color.FromArgb(244, 67, 54), 1))
+        using (var borderPen = new Pen(isEnabled ? Color.Orange : Color.Gray, 1))
         {
             graphics.DrawRectangle(borderPen, 0, 0, size - 1, size - 1);
         }
@@ -181,12 +181,19 @@ public class TrayManager : IDisposable
     {
         var menu = new ContextMenuStrip();
         
+        menu.Items.Add("Translator...", null, (s, e) => OpenTranslator());
         menu.Items.Add("Settings...", null, (s, e) => ShowSettings());
         menu.Items.Add("About...", null, (s, e) => ShowSettings()); // Assuming About is a tab in Settings
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (s, e) => Application.Exit());
 
         return menu;
+    }
+
+    private void OpenTranslator()
+    {
+        var translatorProvider = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<ITranslatorWindowProvider>(AppHost.Services!);
+        translatorProvider.ShowTranslator();
     }
 
     public void Dispose()

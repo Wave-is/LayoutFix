@@ -26,6 +26,10 @@ public class HotkeyCoordinator : IHotkeyCoordinator
 
     private readonly IActiveWindowProvider _activeWindowProvider;
     private readonly ISoundService _soundService;
+    private readonly ITranslationService _translationService;
+    private readonly IPopupService _popupService;
+    private readonly ITranslatorWindowProvider _translatorWindowProvider;
+    private readonly IOfflineTranslationService _offlineTranslationService;
 
     public HotkeyCoordinator(
         IKeyboardHook keyboardHook,
@@ -38,7 +42,11 @@ public class HotkeyCoordinator : IHotkeyCoordinator
         INumberToTextConverter numberToTextConverter,
         ILoggerService logger,
         IActiveWindowProvider activeWindowProvider,
-        ISoundService soundService)
+        ISoundService soundService,
+        ITranslationService translationService,
+        IPopupService popupService,
+        ITranslatorWindowProvider translatorWindowProvider,
+        IOfflineTranslationService offlineTranslationService)
     {
         _keyboardHook = keyboardHook;
         _inputInjector = inputInjector;
@@ -51,6 +59,10 @@ public class HotkeyCoordinator : IHotkeyCoordinator
         _logger = logger;
         _activeWindowProvider = activeWindowProvider;
         _soundService = soundService;
+        _translationService = translationService;
+        _popupService = popupService;
+        _translatorWindowProvider = translatorWindowProvider;
+        _offlineTranslationService = offlineTranslationService;
     }
 
     public void Initialize()
@@ -151,38 +163,80 @@ public class HotkeyCoordinator : IHotkeyCoordinator
                 _logger.LogInfo($"Text after SelectWordLeft + Ctrl+C: '{text}' (Length: {text?.Length ?? 0})");
             }
 
+            if (action == HotkeyAction.OpenTranslator)
+            {
+                _logger.LogInfo("Opening Translator Window...");
+                _translatorWindowProvider.ShowTranslator(text ?? "");
+                return;
+            }
+
             if (!string.IsNullOrEmpty(text))
             {
-                var (newText, targetLayoutCode) = ProcessText(text, action);
-                _logger.LogInfo($"ProcessText result: '{newText}', TargetLayout: '{targetLayoutCode}'");
-
-                bool textChanged = newText != null && newText != text;
-
-                if (textChanged)
+                if (action == HotkeyAction.Translate1 || action == HotkeyAction.Translate2 || action == HotkeyAction.Translate3)
                 {
-                    await _inputInjector.SetClipboardTextAsync(newText!);
-                    await Task.Delay(100);
-                    _logger.LogInfo($"Sending Ctrl+V...");
-                    await _inputInjector.SendKeyCombinationAsync(true, false, false, "v");
-                    await Task.Delay(200);
-                    _logger.LogInfo($"Ctrl+V sent.");
+                    string targetLang = action switch
+                    {
+                        HotkeyAction.Translate1 => _settingsService.Current.TranslateLang1,
+                        HotkeyAction.Translate2 => _settingsService.Current.TranslateLang2,
+                        _ => _settingsService.Current.TranslateLang3
+                    };
+                    
+                    string translation = "";
+                    if (_settingsService.Current.UseOfflineTranslation && _offlineTranslationService.IsModelAvailable())
+                    {
+                        _logger.LogInfo($"Translating to {targetLang} (OFFLINE)...");
+                        translation = await _offlineTranslationService.TranslateAsync(text, targetLang);
+                    }
+                    else
+                    {
+                        _logger.LogInfo($"Translating to {targetLang} (ONLINE)...");
+                        translation = await _translationService.TranslateAsync(text, targetLang);
+                    }
+                    
+                    _logger.LogInfo($"Translation result: {translation}");
+                    
+                    if (!translation.StartsWith("Error:") && translation != "Translation failed.")
+                    {
+                        await _inputInjector.SetClipboardTextAsync(translation);
+                        await Task.Delay(100);
+                        await _inputInjector.SendKeyCombinationAsync(true, false, false, "v");
+                        await Task.Delay(200);
+                        if (_settingsService.Current.SoundEnabled) _soundService.PlaySwitchSound();
+                    }
                 }
-
-                if (targetLayoutCode != null)
+                else
                 {
-                    // Switch to target layout
-                    _logger.LogInfo($"Switching active layout to {targetLayoutCode}");
-                    _activeWindowProvider.SwitchToNextLayout();
-                }
+                    var (newText, targetLayoutCode) = ProcessText(text, action);
+                    _logger.LogInfo($"ProcessText result: '{newText}', TargetLayout: '{targetLayoutCode}'");
 
-                if ((textChanged || targetLayoutCode != null) && _settingsService.Current.SoundEnabled)
-                {
-                    _soundService.PlaySwitchSound();
-                }
+                    bool textChanged = newText != null && newText != text;
 
-                if (!textChanged && targetLayoutCode == null)
-                {
-                    _logger.LogInfo($"Text was not changed by LayoutConverter and layout was not switched.");
+                    if (textChanged)
+                    {
+                        await _inputInjector.SetClipboardTextAsync(newText!);
+                        await Task.Delay(100);
+                        _logger.LogInfo($"Sending Ctrl+V...");
+                        await _inputInjector.SendKeyCombinationAsync(true, false, false, "v");
+                        await Task.Delay(200);
+                        _logger.LogInfo($"Ctrl+V sent.");
+                    }
+
+                    if (targetLayoutCode != null)
+                    {
+                        // Switch to target layout
+                        _logger.LogInfo($"Switching active layout to {targetLayoutCode}");
+                        _activeWindowProvider.SwitchToNextLayout();
+                    }
+
+                    if ((textChanged || targetLayoutCode != null) && _settingsService.Current.SoundEnabled)
+                    {
+                        _soundService.PlaySwitchSound();
+                    }
+
+                    if (!textChanged && targetLayoutCode == null)
+                    {
+                        _logger.LogInfo($"Text was not changed by LayoutConverter and layout was not switched.");
+                    }
                 }
             }
             
