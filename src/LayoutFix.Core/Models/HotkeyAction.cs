@@ -9,6 +9,7 @@ public enum HotkeyAction
     /// Fixes the layout of the last typed word or selected text.
     /// </summary>
     FixLayout,
+    FixLayoutSelected,
 
     /// <summary>
     /// Cycles the case of the selected text.

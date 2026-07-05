@@ -253,6 +253,7 @@ public class HotkeyCoordinator : IHotkeyCoordinator
         switch (action)
         {
             case HotkeyAction.FixLayout:
+            case HotkeyAction.FixLayoutSelected:
                 var activeLayouts = _keyboardLayoutManager.GetLayoutOrder();
                 string currentLayout = _activeWindowProvider.GetActiveLayoutCode();
                 var (converted, _, targetLayout) = _layoutConverter.AutoConvert(text, activeLayouts, currentLayout);
