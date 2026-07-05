@@ -71,9 +71,9 @@ public class KeyboardHook : IKeyboardHook
                     return Win32.CallNextHookEx(_hookId, nCode, wParam, lParam);
                 }
 
-                bool isAlt = IsKeyPressed(Win32.VK_MENU);
-                bool isCtrl = IsKeyPressed(Win32.VK_CONTROL);
-                bool isShift = IsKeyPressed(Win32.VK_SHIFT);
+                bool isAlt = IsKeyPressed(Win32.VK_MENU) || IsKeyPressed(0xA4) || IsKeyPressed(0xA5);
+                bool isCtrl = IsKeyPressed(Win32.VK_CONTROL) || IsKeyPressed(0xA2) || IsKeyPressed(0xA3);
+                bool isShift = IsKeyPressed(Win32.VK_SHIFT) || IsKeyPressed(0xA0) || IsKeyPressed(0xA1);
                 bool isWin = IsKeyPressed(Win32.VK_LWIN) || IsKeyPressed(Win32.VK_RWIN);
                 bool isPrintScreen = IsKeyPressed(0x2C); // VK_SNAPSHOT
 
