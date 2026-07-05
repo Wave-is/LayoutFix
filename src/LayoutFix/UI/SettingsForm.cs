@@ -430,7 +430,8 @@ public class SettingsForm : Form
 
             var lblActive = new Label { Text = "Active", ForeColor = _accentColor, Font = new Font("Segoe UI", 10), AutoSize = true, Location = new Point(370, 25), BackColor = Color.Transparent };
             
-            var pnlFlag = new Panel { Width = 30, Height = 20, Location = new Point(15, 25), BackColor = Color.LightGray };
+            string isoCode = lang.Culture?.TwoLetterISOLanguageName.ToUpperInvariant() ?? "??";
+            var pnlFlag = new Label { Text = isoCode, Width = 34, Height = 22, Location = new Point(15, 24), BackColor = _accentColor, ForeColor = Color.White, Font = new Font("Segoe UI", 9, FontStyle.Bold), TextAlign = ContentAlignment.MiddleCenter };
 
             card.Controls.AddRange(new Control[] { pnlFlag, lblName, lblLayout, lblActive, sw });
             pnl.Controls.Add(card);
@@ -815,7 +816,8 @@ public class SettingsForm : Form
             picLogo.Image = this.Icon?.ToBitmap();
         }
 
-        var lblDesc = new Label { Text = "v1.0 Modern Version\nBuilt with .NET 8.\nAutomatic Layout Converter.", ForeColor = Color.Gray, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(120, 50) };
+        string version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.4";
+        var lblDesc = new Label { Text = $"LayoutFix v{version}\nBuilt with .NET 8.\nAutomatic Layout Converter.", ForeColor = Color.Gray, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(120, 50) };
         
         _tabAbout.Controls.Add(picLogo);
         _tabAbout.Controls.Add(lblDesc);
