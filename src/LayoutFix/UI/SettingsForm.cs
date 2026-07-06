@@ -14,7 +14,7 @@ namespace LayoutFix.UI;
 
 public class SettingsForm : Form
 {
-    private class LangItem { public string Code { get; set; } = ""; public string Name { get; set; } = ""; }
+    public class LangItem { public string Code { get; set; } = ""; public string Name { get; set; } = ""; }
 
     private readonly ISettingsService _settingsService;
     private readonly IAutoStartService _autoStartService;
@@ -818,7 +818,7 @@ public class SettingsForm : Form
             picLogo.Image = this.Icon?.ToBitmap();
         }
 
-        string version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.8";
+        string version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.9";
         var lblDesc = new Label { Text = $"LayoutFix v{version}\nBuilt with .NET 8.\nAutomatic Layout Converter.", ForeColor = Color.Gray, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(120, 50) };
         
         _tabAbout.Controls.Add(picLogo);
