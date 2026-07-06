@@ -1,6 +1,6 @@
 <div align="center">
   <img src="assets/logo.png" alt="LayoutFix Logo" width="128" />
-  <h1>LayoutFix v1.0.5</h1>
+  <h1>LayoutFix v1.0.6</h1>
   <p><b>The ultimate, zero-configuration auto-switcher and offline AI translator for your text.</b></p>
   <p>
     <a href="#english">English</a> •

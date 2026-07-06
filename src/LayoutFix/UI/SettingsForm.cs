@@ -469,33 +469,33 @@ public class SettingsForm : Form
         tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 35F));
 
         // Header Row
-        tlp.Controls.Add(new Label { Text = "Действие", ForeColor = Color.Gray, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
-        tlp.Controls.Add(new Label { Text = "Набор 1", ForeColor = Color.Gray, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 1, 0);
+        tlp.Controls.Add(new Label { Text = _locService.GetString("Settings_Action", "Action"), ForeColor = Color.Gray, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
+        tlp.Controls.Add(new Label { Text = _locService.GetString("Settings_Set1", "Set 1"), ForeColor = Color.Gray, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 1, 0);
         
         var chkAll1 = new CheckBox { CheckAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill, Checked = true };
         chkAll1.CheckedChanged += (s, e) => ToggleSet(1, chkAll1.Checked, tlp);
         tlp.Controls.Add(chkAll1, 2, 0);
         
-        tlp.Controls.Add(new Label { Text = "Набор 2", ForeColor = Color.Gray, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 3, 0);
+        tlp.Controls.Add(new Label { Text = _locService.GetString("Settings_Set2", "Set 2"), ForeColor = Color.Gray, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 3, 0);
         
         var chkAll2 = new CheckBox { CheckAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill, Checked = true };
         chkAll2.CheckedChanged += (s, e) => ToggleSet(2, chkAll2.Checked, tlp);
         tlp.Controls.Add(chkAll2, 4, 0);
         
-        tlp.Controls.Add(new Label { Text = "Набор 3", ForeColor = Color.Gray, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 5, 0);
+        tlp.Controls.Add(new Label { Text = _locService.GetString("Settings_Set3", "Set 3"), ForeColor = Color.Gray, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 5, 0);
         
         var chkAll3 = new CheckBox { CheckAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill, Checked = true };
         chkAll3.CheckedChanged += (s, e) => ToggleSet(3, chkAll3.Checked, tlp);
         tlp.Controls.Add(chkAll3, 6, 0);
 
-        AddTlpRow(tlp, 1, "FixLayout", "Отменить конвертацию", "Scroll", "Pause", "Ctrl+`");
-        AddTlpRow(tlp, 2, "FixLayoutSelected", "Сменить раскладку (выделенный)", "Shift+Scroll", "Shift+Pause", "Ctrl+Shift+`");
-        AddTlpRow(tlp, 3, "ChangeCase", "Сменить регистр (выделенный)", "Alt+Scroll", "Alt+Pause", "Alt+`");
-        AddTlpRow(tlp, 4, "Transliterate", "Транслитерировать (выделенный)", "Ctrl+Alt+Scroll", "Ctrl+Alt+Pause", "Ctrl+Alt+`");
-        AddTlpRow(tlp, 5, "Translate1", "Перевод в Язык 1", "Alt+Shift+T", "", "");
-        AddTlpRow(tlp, 6, "Translate2", "Перевод в Язык 2 (Англ)", "Alt+T", "", "");
-        AddTlpRow(tlp, 7, "Translate3", "Перевод в Язык 3", "Ctrl+Alt+T", "", "");
-        AddTlpRow(tlp, 8, "OpenTranslator", "Открыть Переводчик", "Ctrl+Shift+T", "", "");
+        AddTlpRow(tlp, 1, "FixLayout", _locService.GetString("Settings_CancelConversion", "Cancel Conversion"), "Scroll", "Pause", "Ctrl+`");
+        AddTlpRow(tlp, 2, "FixLayoutSelected", _locService.GetString("Settings_ChangeLayoutSelected", "Change Layout (Selected)"), "Shift+Scroll", "Shift+Pause", "Ctrl+Shift+`");
+        AddTlpRow(tlp, 3, "ChangeCase", _locService.GetString("Settings_ChangeCaseSelected", "Change Case (Selected)"), "Alt+Scroll", "Alt+Pause", "Alt+`");
+        AddTlpRow(tlp, 4, "Transliterate", _locService.GetString("Settings_TransliterateSelected", "Transliterate (Selected)"), "Ctrl+Alt+Scroll", "Ctrl+Alt+Pause", "Ctrl+Alt+`");
+        AddTlpRow(tlp, 5, "Translate1", _locService.GetString("Settings_TranslateLang1", "Translate to Lang 1"), "Alt+Shift+T", "", "");
+        AddTlpRow(tlp, 6, "Translate2", _locService.GetString("Settings_TranslateLang2", "Translate to Lang 2 (En)"), "Alt+T", "", "");
+        AddTlpRow(tlp, 7, "Translate3", _locService.GetString("Settings_TranslateLang3", "Translate to Lang 3"), "Ctrl+Alt+T", "", "");
+        AddTlpRow(tlp, 8, "OpenTranslator", _locService.GetString("Settings_OpenTranslator", "Open Translator"), "Ctrl+Shift+T", "", "");
 
         tlp.ResumeLayout(false);
         tlp.PerformLayout();
@@ -680,19 +680,19 @@ public class SettingsForm : Form
         pnl.Controls.Add(lblTitle);
         y += 40;
 
-        var lblNote = new Label { Text = "⚠️ По умолчанию используется Google Translate (нужен интернет).", ForeColor = Color.Orange, Font = new Font("Segoe UI", 10, FontStyle.Italic), AutoSize = true, Location = new Point(0, y) };
+        var lblNote = new Label { Text = _locService.GetString("Settings_GoogleTranslateNote", "⚠️ Google Translate is used by default (requires internet)."), ForeColor = Color.Orange, Font = new Font("Segoe UI", 10, FontStyle.Italic), AutoSize = true, Location = new Point(0, y) };
         pnl.Controls.Add(lblNote);
         y += 40;
 
-        var tsOffline = CreateToggleSetting("Использовать локальную оффлайн модель (Без интернета)", _currentSettings.UseOfflineTranslation, v => { _currentSettings.UseOfflineTranslation = v; SaveSettings(); }, y);
+        var tsOffline = CreateToggleSetting(_locService.GetString("Settings_UseOfflineModel", "Use local offline model (No internet)"), _currentSettings.UseOfflineTranslation, v => { _currentSettings.UseOfflineTranslation = v; SaveSettings(); }, y);
         pnl.Controls.Add(tsOffline);
         y += 50;
 
-        var lblModel = new Label { Text = "Выбор модели:", AutoSize = true, Location = new Point(0, y + 4), ForeColor = _textColor };
+        var lblModel = new Label { Text = _locService.GetString("Settings_ModelSelection", "Model selection:"), AutoSize = true, Location = new Point(0, y + 4), ForeColor = _textColor };
         var cmbModel = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 350, Location = new Point(120, y), BackColor = _sidebarColor, ForeColor = _textColor };
-        cmbModel.Items.Add(new { Id = "light", Name = "Легкая Qwen 0.5B (350 МБ, CPU)" });
-        cmbModel.Items.Add(new { Id = "alma", Name = "Специализированная ALMA 7B (4 ГБ, GPU)" });
-        cmbModel.Items.Add(new { Id = "pro", Name = "Общая Gemma 2B (1.6 ГБ, GPU)" });
+        cmbModel.Items.Add(new { Id = "light", Name = _locService.GetString("Settings_ModelLight", "Light Qwen 0.5B (350 MB, CPU)") });
+        cmbModel.Items.Add(new { Id = "alma", Name = _locService.GetString("Settings_ModelAlma", "Specialized ALMA 7B (4 GB, GPU)") });
+        cmbModel.Items.Add(new { Id = "pro", Name = _locService.GetString("Settings_ModelGemma", "General Gemma 2B (1.6 GB, GPU)") });
         cmbModel.ValueMember = "Id";
         cmbModel.DisplayMember = "Name";
         
@@ -712,10 +712,10 @@ public class SettingsForm : Form
             string path = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LayoutFix", "Models", fileName);
             
             if (downloadService.IsModelDownloaded(path)) {
-                btnDownload.Text = "Модель скачана";
+                btnDownload.Text = _locService.GetString("Settings_ModelDownloaded", "Model Downloaded");
                 btnDownload.Enabled = false;
             } else {
-                btnDownload.Text = "Скачать модель";
+                btnDownload.Text = _locService.GetString("Settings_DownloadModel", "Download Model");
                 btnDownload.Enabled = true;
             }
         };
@@ -732,7 +732,7 @@ public class SettingsForm : Form
         {
             btnDownload.Enabled = false;
             progressDownload.Visible = true;
-            btnDownload.Text = "Скачивание...";
+            btnDownload.Text = _locService.GetString("Settings_Downloading", "Downloading...");
             try
             {
                 string modelType = _currentSettings.OfflineModelType;
@@ -752,8 +752,8 @@ public class SettingsForm : Form
             }
             catch (Exception ex)
             {
-                btnDownload.Text = "Ошибка скачивания";
-                MessageBox.Show("Ошибка скачивания: " + ex.Message);
+                btnDownload.Text = _locService.GetString("Settings_DownloadError", "Download Error");
+                MessageBox.Show(_locService.GetString("Settings_DownloadError", "Download Error") + ": " + ex.Message);
                 btnDownload.Enabled = true;
             }
         };
@@ -773,9 +773,9 @@ public class SettingsForm : Form
             new { Code="pt", Name="Português" }
         };
 
-        pnl.Controls.Add(CreateLanguageDropdown("Translation Language 1", _currentSettings.TranslateLang1, locales, v => { _currentSettings.TranslateLang1 = v; SaveSettings(); }, ref y));
-        pnl.Controls.Add(CreateLanguageDropdown("Translation Language 2", _currentSettings.TranslateLang2, locales, v => { _currentSettings.TranslateLang2 = v; SaveSettings(); }, ref y));
-        pnl.Controls.Add(CreateLanguageDropdown("Translation Language 3", _currentSettings.TranslateLang3, locales, v => { _currentSettings.TranslateLang3 = v; SaveSettings(); }, ref y));
+        pnl.Controls.Add(CreateLanguageDropdown("Translation Language 1", _currentSettings.TranslateLang1, locales.ToList<object>().ToArray(), v => { _currentSettings.TranslateLang1 = v; SaveSettings(); }, ref y));
+        pnl.Controls.Add(CreateLanguageDropdown("Translation Language 2", _currentSettings.TranslateLang2, locales.ToList<object>().ToArray(), v => { _currentSettings.TranslateLang2 = v; SaveSettings(); }, ref y));
+        pnl.Controls.Add(CreateLanguageDropdown("Translation Language 3", _currentSettings.TranslateLang3, locales.ToList<object>().ToArray(), v => { _currentSettings.TranslateLang3 = v; SaveSettings(); }, ref y));
 
         _tabTranslate.Controls.Add(pnl);
     }
@@ -816,7 +816,7 @@ public class SettingsForm : Form
             picLogo.Image = this.Icon?.ToBitmap();
         }
 
-        string version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.5";
+        string version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.6";
         var lblDesc = new Label { Text = $"LayoutFix v{version}\nBuilt with .NET 8.\nAutomatic Layout Converter.", ForeColor = Color.Gray, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(120, 50) };
         
         _tabAbout.Controls.Add(picLogo);
