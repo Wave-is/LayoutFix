@@ -14,6 +14,8 @@ namespace LayoutFix.UI;
 
 public class SettingsForm : Form
 {
+    private class LangItem { public string Code { get; set; } = ""; public string Name { get; set; } = ""; }
+
     private readonly ISettingsService _settingsService;
     private readonly IAutoStartService _autoStartService;
     private readonly ILocalizationService _locService;
@@ -320,15 +322,15 @@ public class SettingsForm : Form
         var lblLang = new Label { Text = "Interface Language", ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
         var cmbLang = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(350, 8), BackColor = _sidebarColor, ForeColor = _textColor };
         
-        var locales = new[] {
-            new { Code="en", Name="English" }, new { Code="ru", Name="Русский" }, new { Code="uk", Name="Українська" },
-            new { Code="de", Name="Deutsch" }, new { Code="pl", Name="Polski" }, new { Code="es", Name="Español" },
-            new { Code="cs", Name="Čeština" }, new { Code="fr", Name="Français" }, new { Code="it", Name="Italiano" },
-            new { Code="tr", Name="Türkçe" }, new { Code="kk", Name="Қазақ тілі" }, new { Code="ka", Name="ქართული" },
-            new { Code="sr", Name="Српски" }, new { Code="hy", Name="Հայերեն" }, new { Code="he", Name="עברית" },
-            new { Code="ro", Name="Română" }, new { Code="sk", Name="Slovenčina" }, new { Code="nl", Name="Nederlands" },
-            new { Code="bg", Name="Български" }, new { Code="el", Name="Ελληνικά" }, new { Code="th", Name="ไทย" },
-            new { Code="pt", Name="Português" }
+        var locales = new LangItem[] {
+            new LangItem{ Code="en", Name="English" }, new LangItem{ Code="ru", Name="Русский" }, new LangItem{ Code="uk", Name="Українська" },
+            new LangItem{ Code="de", Name="Deutsch" }, new LangItem{ Code="pl", Name="Polski" }, new LangItem{ Code="es", Name="Español" },
+            new LangItem{ Code="cs", Name="Čeština" }, new LangItem{ Code="fr", Name="Français" }, new LangItem{ Code="it", Name="Italiano" },
+            new LangItem{ Code="tr", Name="Türkçe" }, new LangItem{ Code="kk", Name="Қазақ тілі" }, new LangItem{ Code="ka", Name="ქართული" },
+            new LangItem{ Code="sr", Name="Српски" }, new LangItem{ Code="hy", Name="Հայերեն" }, new LangItem{ Code="he", Name="עברית" },
+            new LangItem{ Code="ro", Name="Română" }, new LangItem{ Code="sk", Name="Slovenčina" }, new LangItem{ Code="nl", Name="Nederlands" },
+            new LangItem{ Code="bg", Name="Български" }, new LangItem{ Code="el", Name="Ελληνικά" }, new LangItem{ Code="th", Name="ไทย" },
+            new LangItem{ Code="pt", Name="Português" }
         };
         cmbLang.DataSource = locales;
         cmbLang.DisplayMember = "Name";
@@ -762,25 +764,25 @@ public class SettingsForm : Form
         pnl.Controls.Add(progressDownload);
         y += 50;
 
-        var locales = new[] {
-            new { Code="en", Name="English" }, new { Code="ru", Name="Русский" }, new { Code="uk", Name="Українська" },
-            new { Code="de", Name="Deutsch" }, new { Code="pl", Name="Polski" }, new { Code="es", Name="Español" },
-            new { Code="cs", Name="Čeština" }, new { Code="fr", Name="Français" }, new { Code="it", Name="Italiano" },
-            new { Code="tr", Name="Türkçe" }, new { Code="kk", Name="Қазақ тілі" }, new { Code="ka", Name="ქართული" },
-            new { Code="sr", Name="Српски" }, new { Code="hy", Name="Հայերեն" }, new { Code="he", Name="עברית" },
-            new { Code="ro", Name="Română" }, new { Code="sk", Name="Slovenčina" }, new { Code="nl", Name="Nederlands" },
-            new { Code="bg", Name="Български" }, new { Code="el", Name="Ελληνικά" }, new { Code="th", Name="ไทย" },
-            new { Code="pt", Name="Português" }
+        var locales = new LangItem[] {
+            new LangItem{ Code="en", Name="English" }, new LangItem{ Code="ru", Name="Русский" }, new LangItem{ Code="uk", Name="Українська" },
+            new LangItem{ Code="de", Name="Deutsch" }, new LangItem{ Code="pl", Name="Polski" }, new LangItem{ Code="es", Name="Español" },
+            new LangItem{ Code="cs", Name="Čeština" }, new LangItem{ Code="fr", Name="Français" }, new LangItem{ Code="it", Name="Italiano" },
+            new LangItem{ Code="tr", Name="Türkçe" }, new LangItem{ Code="kk", Name="Қазақ тілі" }, new LangItem{ Code="ka", Name="ქართული" },
+            new LangItem{ Code="sr", Name="Српски" }, new LangItem{ Code="hy", Name="Հայերեն" }, new LangItem{ Code="he", Name="עברית" },
+            new LangItem{ Code="ro", Name="Română" }, new LangItem{ Code="sk", Name="Slovenčina" }, new LangItem{ Code="nl", Name="Nederlands" },
+            new LangItem{ Code="bg", Name="Български" }, new LangItem{ Code="el", Name="Ελληνικά" }, new LangItem{ Code="th", Name="ไทย" },
+            new LangItem{ Code="pt", Name="Português" }
         };
 
-        pnl.Controls.Add(CreateLanguageDropdown("Translation Language 1", _currentSettings.TranslateLang1, locales.ToList<object>().ToArray(), v => { _currentSettings.TranslateLang1 = v; SaveSettings(); }, ref y));
-        pnl.Controls.Add(CreateLanguageDropdown("Translation Language 2", _currentSettings.TranslateLang2, locales.ToList<object>().ToArray(), v => { _currentSettings.TranslateLang2 = v; SaveSettings(); }, ref y));
-        pnl.Controls.Add(CreateLanguageDropdown("Translation Language 3", _currentSettings.TranslateLang3, locales.ToList<object>().ToArray(), v => { _currentSettings.TranslateLang3 = v; SaveSettings(); }, ref y));
+        pnl.Controls.Add(CreateLanguageDropdown("Translation Language 1", _currentSettings.TranslateLang1, locales.ToArray(), v => { _currentSettings.TranslateLang1 = v; SaveSettings(); }, ref y));
+        pnl.Controls.Add(CreateLanguageDropdown("Translation Language 2", _currentSettings.TranslateLang2, locales.ToArray(), v => { _currentSettings.TranslateLang2 = v; SaveSettings(); }, ref y));
+        pnl.Controls.Add(CreateLanguageDropdown("Translation Language 3", _currentSettings.TranslateLang3, locales.ToArray(), v => { _currentSettings.TranslateLang3 = v; SaveSettings(); }, ref y));
 
         _tabTranslate.Controls.Add(pnl);
     }
 
-    private Panel CreateLanguageDropdown(string label, string currentVal, object[] locales, Action<string> onChange, ref int y)
+    private Panel CreateLanguageDropdown(string label, string currentVal, LangItem[] locales, Action<string> onChange, ref int y)
     {
         var pnl = new Panel { Width = 500, Height = 40, Location = new Point(0, y) };
         var lbl = new Label { Text = label, ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
@@ -816,7 +818,7 @@ public class SettingsForm : Form
             picLogo.Image = this.Icon?.ToBitmap();
         }
 
-        string version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.7";
+        string version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.8";
         var lblDesc = new Label { Text = $"LayoutFix v{version}\nBuilt with .NET 8.\nAutomatic Layout Converter.", ForeColor = Color.Gray, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(120, 50) };
         
         _tabAbout.Controls.Add(picLogo);
