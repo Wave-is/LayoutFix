@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using LayoutFix.Core.Interfaces;
 using LayoutFix.Core.Models;
@@ -14,6 +15,7 @@ public interface IHotkeyCoordinator : IDisposable
 
 public class HotkeyCoordinator : IHotkeyCoordinator
 {
+    private readonly SemaphoreSlim _executionLock = new SemaphoreSlim(1, 1);
     private readonly IKeyboardHook _keyboardHook;
     private readonly IInputInjector _inputInjector;
     private readonly ISettingsService _settingsService;
@@ -133,6 +135,12 @@ public class HotkeyCoordinator : IHotkeyCoordinator
 
     public async Task ExecuteActionAsync(HotkeyAction action)
     {
+        if (!_executionLock.Wait(0))
+        {
+            _logger.LogInfo($"Action {action} ignored because another action is already executing.");
+            return;
+        }
+
         try
         {
             _logger.LogInfo($"--- ExecuteActionAsync Started for action: {action} ---");
@@ -143,23 +151,40 @@ public class HotkeyCoordinator : IHotkeyCoordinator
             string? backup = await _inputInjector.GetClipboardTextAsync();
             _logger.LogInfo($"Clipboard backup captured. Length: {backup?.Length ?? 0}");
 
-            await _inputInjector.SetClipboardTextAsync(""); 
-            _logger.LogInfo($"Clipboard cleared.");
+            string magic = "LAYOUTFIX_MAGIC_" + Guid.NewGuid().ToString();
+            await _inputInjector.SetClipboardTextAsync(magic); 
+            _logger.LogInfo($"Clipboard seeded with magic string.");
             
             await _inputInjector.SendKeyCombinationAsync(true, false, false, "c");
-            await Task.Delay(200);
             
-            string? text = await _inputInjector.GetClipboardTextAsync();
+            string? text = null;
+            for(int i = 0; i < 25; i++)
+            {
+                await Task.Delay(20);
+                text = await _inputInjector.GetClipboardTextAsync();
+                if (text != magic) break;
+            }
+            if (text == magic) text = "";
+            
             _logger.LogInfo($"Text after Ctrl+C: '{text}' (Length: {text?.Length ?? 0})");
             
             if (string.IsNullOrEmpty(text))
             {
                 _logger.LogInfo($"Text was empty. Attempting to select word left...");
                 await _inputInjector.SelectWordLeftAsync();
-                await Task.Delay(100);
+                await Task.Delay(50);
+                
+                await _inputInjector.SetClipboardTextAsync(magic);
                 await _inputInjector.SendKeyCombinationAsync(true, false, false, "c");
-                await Task.Delay(200);
-                text = await _inputInjector.GetClipboardTextAsync();
+                
+                for(int i = 0; i < 25; i++)
+                {
+                    await Task.Delay(20);
+                    text = await _inputInjector.GetClipboardTextAsync();
+                    if (text != magic) break;
+                }
+                if (text == magic) text = "";
+                
                 _logger.LogInfo($"Text after SelectWordLeft + Ctrl+C: '{text}' (Length: {text?.Length ?? 0})");
             }
 
@@ -245,6 +270,10 @@ public class HotkeyCoordinator : IHotkeyCoordinator
         catch (Exception ex)
         {
             _logger.LogError($"Error in ExecuteActionAsync for {action}", ex);
+        }
+        finally
+        {
+            _executionLock.Release();
         }
     }
 
