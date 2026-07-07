@@ -145,26 +145,28 @@ public class HotkeyCoordinator : IHotkeyCoordinator
         {
             _logger.LogInfo($"--- ExecuteActionAsync Started for action: {action} ---");
             
-            await _inputInjector.ReleaseModifiersAsync();
+            await _inputInjector.WaitForModifiersReleaseAsync();
             _logger.LogInfo($"Modifiers released.");
             
             string? backup = await _inputInjector.GetClipboardTextAsync();
             _logger.LogInfo($"Clipboard backup captured. Length: {backup?.Length ?? 0}");
 
-            string magic = "LAYOUTFIX_MAGIC_" + Guid.NewGuid().ToString();
-            await _inputInjector.SetClipboardTextAsync(magic); 
-            _logger.LogInfo($"Clipboard seeded with magic string.");
+            await _inputInjector.SetClipboardTextAsync(""); // Clear to ensure sequence updates
+            uint startSeq = _inputInjector.GetClipboardSequenceNumber();
             
             await _inputInjector.SendKeyCombinationAsync(true, false, false, "c");
             
             string? text = null;
-            for(int i = 0; i < 25; i++)
+            for(int i = 0; i < 50; i++) // 50 * 20ms = 1000ms timeout
             {
                 await Task.Delay(20);
-                text = await _inputInjector.GetClipboardTextAsync();
-                if (text != magic) break;
+                if (_inputInjector.GetClipboardSequenceNumber() != startSeq)
+                {
+                    await Task.Delay(30); // give target app a moment to finish writing
+                    text = await _inputInjector.GetClipboardTextAsync();
+                    break;
+                }
             }
-            if (text == magic) text = "";
             
             _logger.LogInfo($"Text after Ctrl+C: '{text}' (Length: {text?.Length ?? 0})");
             
@@ -174,16 +176,20 @@ public class HotkeyCoordinator : IHotkeyCoordinator
                 await _inputInjector.SelectWordLeftAsync();
                 await Task.Delay(50);
                 
-                await _inputInjector.SetClipboardTextAsync(magic);
+                await _inputInjector.SetClipboardTextAsync(""); // Clear again
+                startSeq = _inputInjector.GetClipboardSequenceNumber();
                 await _inputInjector.SendKeyCombinationAsync(true, false, false, "c");
                 
-                for(int i = 0; i < 25; i++)
+                for(int i = 0; i < 50; i++)
                 {
                     await Task.Delay(20);
-                    text = await _inputInjector.GetClipboardTextAsync();
-                    if (text != magic) break;
+                    if (_inputInjector.GetClipboardSequenceNumber() != startSeq)
+                    {
+                        await Task.Delay(30);
+                        text = await _inputInjector.GetClipboardTextAsync();
+                        break;
+                    }
                 }
-                if (text == magic) text = "";
                 
                 _logger.LogInfo($"Text after SelectWordLeft + Ctrl+C: '{text}' (Length: {text?.Length ?? 0})");
             }

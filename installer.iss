@@ -1,6 +1,6 @@
 [Setup]
 AppName=LayoutFix
-AppVersion=1.0.9
+AppVersion=1.0.10
 AppPublisher=Wave-is
 AppPublisherURL=https://github.com/Wave-is/LayoutFix
 DefaultDirName={autopf}\LayoutFix

@@ -77,6 +77,27 @@ public class InputInjector : IInputInjector
         await Task.Delay(50);
     }
 
+    public async Task WaitForModifiersReleaseAsync(int timeoutMs = 2000)
+    {
+        int elapsed = 0;
+        while (elapsed < timeoutMs)
+        {
+            bool shift = (Win32.GetAsyncKeyState(Win32.VK_SHIFT) & 0x8000) != 0;
+            bool ctrl = (Win32.GetAsyncKeyState(Win32.VK_CONTROL) & 0x8000) != 0;
+            bool alt = (Win32.GetAsyncKeyState(Win32.VK_MENU) & 0x8000) != 0;
+            bool lwin = (Win32.GetAsyncKeyState(Win32.VK_LWIN) & 0x8000) != 0;
+            bool rwin = (Win32.GetAsyncKeyState(Win32.VK_RWIN) & 0x8000) != 0;
+
+            if (!shift && !ctrl && !alt && !lwin && !rwin)
+            {
+                break;
+            }
+            await Task.Delay(20);
+            elapsed += 20;
+        }
+        await ReleaseModifiersAsync();
+    }
+
     public async Task SendTextAsync(string text)
     {
         if (string.IsNullOrEmpty(text)) return;
@@ -187,6 +208,11 @@ public class InputInjector : IInputInjector
         t.Start();
         t.Join();
         await Task.CompletedTask;
+    }
+
+    public uint GetClipboardSequenceNumber()
+    {
+        return Win32.GetClipboardSequenceNumber();
     }
 
     private Win32.INPUT CreateKeyboardInput(ushort vk, bool isKeyUp)

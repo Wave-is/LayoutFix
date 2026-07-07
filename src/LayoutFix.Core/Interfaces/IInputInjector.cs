@@ -11,4 +11,6 @@ public interface IInputInjector
     Task SelectWordLeftAsync();
     Task<string?> GetClipboardTextAsync();
     Task SetClipboardTextAsync(string text);
+    Task WaitForModifiersReleaseAsync(int timeoutMs = 2000);
+    uint GetClipboardSequenceNumber();
 }

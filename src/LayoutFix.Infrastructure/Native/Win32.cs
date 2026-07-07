@@ -141,6 +141,9 @@ public static class Win32
     [DllImport("user32.dll")]
     public static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO lpgui);
 
+    [DllImport("user32.dll")]
+    public static extern uint GetClipboardSequenceNumber();
+
     public static string GetActiveLayoutCode()
     {
         IntPtr hwnd = GetForegroundWindow();
