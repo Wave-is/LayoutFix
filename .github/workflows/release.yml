@@ -35,8 +35,10 @@ jobs:
       - name: Verify release version
         shell: pwsh
         run: |
-          [xml]$project = Get-Content "src\LayoutFix\LayoutFix.csproj"
-          $projectVersion = $project.Project.PropertyGroup.Version | Select-Object -First 1
+          $projectVersion = (& dotnet msbuild "src\LayoutFix\LayoutFix.csproj" -nologo -getProperty:Version).Trim()
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($projectVersion)) {
+            throw "The evaluated project version could not be read from MSBuild."
+          }
           $tagVersion = "${{ github.ref_name }}".TrimStart('v')
           if ($projectVersion -ne $tagVersion) {
             throw "Tag version $tagVersion does not match project version $projectVersion."
