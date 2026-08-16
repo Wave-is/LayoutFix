@@ -64,6 +64,15 @@ BenchmarkDotNet.Artifacts/
 project.lock.json
 project.fragment.lock.json
 artifacts/
+.dotnet/
+.nuget/
+.tools/
+Output/*_Test.exe
+/settings.json
+/LayoutFix_v*.zip
+/TestSend.*
+/test.cs
+/tests/*.exe
 
 # Tye
 .tye/

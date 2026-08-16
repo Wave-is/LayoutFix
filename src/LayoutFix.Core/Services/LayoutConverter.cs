@@ -13,8 +13,8 @@ public class LayoutConverter : ILayoutConverter
     {
         if (string.IsNullOrEmpty(text)) return text;
         
-        var reverseKeys = source.Keys.ToDictionary(kvp => kvp.Value, kvp => kvp.Key);
-        var reverseShiftKeys = source.ShiftKeys.ToDictionary(kvp => kvp.Value, kvp => kvp.Key);
+        var reverseKeys = CreateUnambiguousReverseMap(source.Keys);
+        var reverseShiftKeys = CreateUnambiguousReverseMap(source.ShiftKeys);
 
         var sb = new StringBuilder(text.Length);
         foreach (var c in text)
@@ -67,50 +67,94 @@ public class LayoutConverter : ILayoutConverter
         return sb.ToString();
     }
 
+    private static Dictionary<string, string> CreateUnambiguousReverseMap(
+        IEnumerable<KeyValuePair<string, string>> mappings)
+    {
+        // Custom and OEM Windows layouts can emit the same character from more
+        // than one physical key. Guessing which key produced it can corrupt the
+        // conversion, while ToDictionary would throw and abort the hotkey path.
+        // Keep only mappings whose physical key can be reconstructed safely.
+        return mappings
+            .Where(mapping => !string.IsNullOrEmpty(mapping.Value))
+            .GroupBy(mapping => mapping.Value, StringComparer.Ordinal)
+            .Where(group => group.Count() == 1)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Single().Key,
+                StringComparer.Ordinal);
+    }
+
     public (string? ConvertedText, Layout? Source, Layout? Target) AutoConvert(string text, IReadOnlyList<Layout> activeLayouts, string? currentLayoutCode = null)
     {
         if (string.IsNullOrWhiteSpace(text) || activeLayouts.Count < 2)
             return (null, null, null);
 
-        var scores = new Dictionary<Layout, int>();
-        foreach (var layout in activeLayouts)
+        var characterSets = activeLayouts.ToDictionary(
+            layout => layout,
+            layout => new HashSet<string>(
+                layout.Keys.Values.Concat(layout.ShiftKeys.Values),
+                StringComparer.OrdinalIgnoreCase));
+
+        // Every letter must be compatible with the same source layout. This prevents
+        // mixed text such as "ghbdtn привет" from being partially and destructively
+        // converted merely because one alphabet happens to win (or tie) by score.
+        HashSet<Layout>? sourceCandidates = null;
+        var meaningfulCharacterCount = 0;
+
+        foreach (var character in text.Where(char.IsLetter))
         {
-            int score = 0;
-            var allChars = new HashSet<string>(layout.Keys.Values.Concat(layout.ShiftKeys.Values));
-            foreach (var c in text)
-            {
-                var charStr = c.ToString();
-                if (allChars.Contains(charStr) || allChars.Contains(charStr.ToLower()))
-                {
-                    score++;
-                }
-            }
-            scores[layout] = score;
+            meaningfulCharacterCount++;
+            var characterString = character.ToString();
+            var matchingLayouts = activeLayouts
+                .Where(layout => characterSets[layout].Contains(characterString))
+                .ToHashSet();
+
+            if (matchingLayouts.Count == 0)
+                return (null, null, null);
+
+            sourceCandidates ??= matchingLayouts;
+            sourceCandidates.IntersectWith(matchingLayouts);
+
+            if (sourceCandidates.Count == 0)
+                return (null, null, null);
         }
 
-        int maxScore = scores.Values.Max();
-        if (maxScore == 0) return (null, null, null);
+        if (meaningfulCharacterCount == 0 || sourceCandidates is null)
+            return (null, null, null);
 
-        var bestLayouts = scores.Where(kvp => kvp.Value == maxScore).Select(kvp => kvp.Key).ToList();
+        var sourceLayout = sourceCandidates.FirstOrDefault(layout => string.Equals(
+                               layout.EffectiveIdentifier,
+                               currentLayoutCode,
+                               StringComparison.OrdinalIgnoreCase)) ??
+                           sourceCandidates.FirstOrDefault(layout =>
+                               IsSameLayoutCulture(layout, currentLayoutCode)) ??
+            activeLayouts.First(sourceCandidates.Contains);
 
-        Layout sourceLayout;
-        if (bestLayouts.Count > 1 && !string.IsNullOrEmpty(currentLayoutCode))
-        {
-            var matchingCurrent = bestLayouts.FirstOrDefault(l => string.Equals(l.Code, currentLayoutCode, StringComparison.OrdinalIgnoreCase));
-            sourceLayout = matchingCurrent ?? bestLayouts.First();
-        }
-        else
-        {
-            sourceLayout = bestLayouts.First();
-        }
-
-        int index = -1;
-        for (int i = 0; i < activeLayouts.Count; i++) {
-            if (activeLayouts[i].Code == sourceLayout.Code) { index = i; break; }
-        }
-        var targetLayout = activeLayouts[(index + 1) % activeLayouts.Count];
+        var index = Enumerable.Range(0, activeLayouts.Count)
+            .First(i => ReferenceEquals(activeLayouts[i], sourceLayout));
+        var targetLayout = Enumerable.Range(1, activeLayouts.Count - 1)
+            .Select(offset => activeLayouts[(index + offset) % activeLayouts.Count])
+            .FirstOrDefault(candidate => !KeyboardLayoutIdentity.SameLanguage(
+                candidate.Code,
+                sourceLayout.Code));
+        if (targetLayout == null)
+            return (null, null, null);
 
         var converted = ConvertTo(text, targetLayout, sourceLayout);
+        if (string.Equals(converted, text, StringComparison.Ordinal))
+            return (null, null, null);
+
         return (converted, sourceLayout, targetLayout);
+    }
+
+    private static bool IsSameLayoutCulture(Layout layout, string? currentLayoutCode)
+    {
+        if (string.IsNullOrWhiteSpace(currentLayoutCode))
+            return false;
+
+        if (string.Equals(layout.Code, currentLayoutCode, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return KeyboardLayoutIdentity.SameLanguage(layout.Code, currentLayoutCode);
     }
 }

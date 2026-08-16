@@ -2,6 +2,7 @@
   "Settings_Title": "LayoutFix",
   "Settings_General": "Settings",
   "Settings_Languages": "Languages",
+  "Settings_UseWindowsLayouts": "Use installed Windows keyboard layouts",
   "Settings_Hotkeys": "Hotkeys",
   "Settings_Exceptions": "Exceptions",
   "Settings_Dict": "Dictionary",

@@ -49,4 +49,66 @@ public class AutoDetectionTests
         var (text, src, tgt) = converter.AutoConvert("ghbdtn привет", new[] { _en, _ru });
         Assert.Null(text);
     }
+
+    [Fact]
+    public void AutoDetect_UsesExactActiveVariantWhenCulturesMatch()
+    {
+        var primary = new Layout
+        {
+            Code = "en-US",
+            Identifier = "en-US@04090409",
+            Keys = new Dictionary<string, string> { ["a"] = "x" }
+        };
+        var alternative = new Layout
+        {
+            Code = "en-US",
+            Identifier = "en-US@00010409",
+            Keys = new Dictionary<string, string> { ["b"] = "x" }
+        };
+        var target = new Layout
+        {
+            Code = "ru-RU",
+            Identifier = "ru-RU@04190419",
+            Keys = new Dictionary<string, string> { ["a"] = "ф", ["b"] = "и" }
+        };
+
+        var (text, source, _) = new LayoutConverter().AutoConvert(
+            "x",
+            [primary, alternative, target],
+            alternative.Identifier);
+
+        Assert.Equal("и", text);
+        Assert.Same(alternative, source);
+    }
+
+    [Fact]
+    public void AutoDetect_SkipsSameCultureVariantWhenChoosingTarget()
+    {
+        var primary = new Layout
+        {
+            Code = "en-US",
+            Identifier = "en-US@04090409",
+            Keys = new Dictionary<string, string> { ["a"] = "x" }
+        };
+        var alternative = new Layout
+        {
+            Code = "en-US",
+            Identifier = "en-US@00010409",
+            Keys = new Dictionary<string, string> { ["b"] = "y" }
+        };
+        var target = new Layout
+        {
+            Code = "ru-RU",
+            Identifier = "ru-RU@04190419",
+            Keys = new Dictionary<string, string> { ["a"] = "ф", ["b"] = "и" }
+        };
+
+        var (text, _, selectedTarget) = new LayoutConverter().AutoConvert(
+            "x",
+            [primary, alternative, target],
+            primary.Identifier);
+
+        Assert.Equal("ф", text);
+        Assert.Same(target, selectedTarget);
+    }
 }

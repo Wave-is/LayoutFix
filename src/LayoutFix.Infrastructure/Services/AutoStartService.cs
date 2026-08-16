@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using Microsoft.Win32;
 using LayoutFix.Core.Interfaces;
 
@@ -18,7 +17,7 @@ public class AutoStartService : IAutoStartService
             {
                 using var key = Registry.CurrentUser.OpenSubKey(RegistryKey, false);
                 var value = key?.GetValue(AppName) as string;
-                return value == GetExecutablePath();
+                return StartupCommandMatches(value, GetExecutablePath());
             }
             catch
             {
@@ -29,12 +28,11 @@ public class AutoStartService : IAutoStartService
         {
             try
             {
-                using var key = Registry.CurrentUser.OpenSubKey(RegistryKey, true);
-                if (key == null) return;
+                using var key = Registry.CurrentUser.CreateSubKey(RegistryKey, true);
 
                 if (value)
                 {
-                    key.SetValue(AppName, GetExecutablePath());
+                    key.SetValue(AppName, BuildStartupCommand(GetExecutablePath()));
                 }
                 else
                 {
@@ -44,16 +42,42 @@ public class AutoStartService : IAutoStartService
                     }
                 }
             }
-            catch
+            catch (Exception exception)
             {
-                // Ignore permissions/registry errors
+                throw new InvalidOperationException(
+                    "Windows startup registration could not be updated.",
+                    exception);
             }
         }
     }
 
-    private string GetExecutablePath()
+    internal static bool StartupCommandMatches(string? command, string executablePath)
     {
-        using var process = Process.GetCurrentProcess();
-        return process.MainModule?.FileName ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(command) || string.IsNullOrWhiteSpace(executablePath))
+            return false;
+
+        var trimmed = command.Trim();
+        if (string.Equals(trimmed, executablePath, StringComparison.OrdinalIgnoreCase))
+        {
+            // Keep compatibility with old commands only when quoting is not
+            // required. An unquoted Run path containing whitespace can be
+            // parsed as a different executable and must be repaired.
+            return !trimmed.Any(char.IsWhiteSpace);
+        }
+        if (trimmed.Length < 2 || trimmed[0] != '"')
+            return false;
+
+        var closingQuote = trimmed.IndexOf('"', 1);
+        return closingQuote > 1 &&
+               string.IsNullOrWhiteSpace(trimmed[(closingQuote + 1)..]) &&
+               string.Equals(
+            trimmed[1..closingQuote],
+            executablePath,
+            StringComparison.OrdinalIgnoreCase);
     }
+
+    internal static string BuildStartupCommand(string executablePath) =>
+        $"\"{executablePath.Trim().Trim('"')}\"";
+
+    private static string GetExecutablePath() => Environment.ProcessPath ?? string.Empty;
 }

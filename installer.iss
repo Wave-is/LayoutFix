@@ -1,53 +1,51 @@
+#ifndef MyAppVersion
+#define MyAppVersion "1.0.12"
+#endif
+
 [Setup]
 AppName=LayoutFix
-AppVersion=1.0.10
+AppId=Wave-is.LayoutFix
+AppVersion={#MyAppVersion}
 AppPublisher=Wave-is
 AppPublisherURL=https://github.com/Wave-is/LayoutFix
-DefaultDirName={autopf}\LayoutFix
+DefaultDirName={localappdata}\Programs\LayoutFix
 DefaultGroupName=LayoutFix
+OutputDir=Output
+#ifdef LayoutFixTestInstall
+OutputBaseFilename=LayoutFix_Setup_Test
+Compression=none
+SolidCompression=no
+Uninstallable=yes
+CreateUninstallRegKey=no
+#else
 OutputBaseFilename=LayoutFix_Setup
 Compression=lzma
 SolidCompression=yes
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
+#endif
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+PrivilegesRequired=lowest
+WizardStyle=modern
+VersionInfoVersion={#MyAppVersion}.0
+VersionInfoProductVersion={#MyAppVersion}
+VersionInfoDescription=LayoutFix Setup
 UninstallDisplayIcon={app}\LayoutFix.exe
 AppMutex=LayoutFix_SingleInstance_Mutex
-CloseApplications=force
+CloseApplications=yes
+RestartApplications=no
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
-Name: "autostart"; Description: "Run LayoutFix automatically when Windows starts"; GroupDescription: "System integration:"
+Name: "autostart"; Description: "Run LayoutFix automatically when Windows starts"; GroupDescription: "System integration:"; Flags: unchecked
 
 [Files]
 Source: "src\LayoutFix\bin\Release\net8.0-windows\win-x64\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "Dictionaries\*"; DestDir: "{app}\Dictionaries"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "Sounds\*"; DestDir: "{app}\Sounds"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "locales\*"; DestDir: "{app}\locales"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\LayoutFix"; Filename: "{app}\LayoutFix.exe"
 Name: "{autodesktop}\LayoutFix"; Filename: "{app}\LayoutFix.exe"; Tasks: desktopicon
-Name: "{userstartup}\LayoutFix"; Filename: "{app}\LayoutFix.exe"; Tasks: autostart
+
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "LayoutFix"; ValueData: """{app}\LayoutFix.exe"""; Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
 Filename: "{app}\LayoutFix.exe"; Description: "Launch LayoutFix now"; Flags: nowait postinstall skipifsilent
-
-[Code]
-procedure CurStepChanged(CurStep: TSetupStep);
-var
-  ResultCode: Integer;
-begin
-  if CurStep = ssInstall then
-  begin
-    Exec('taskkill.exe', '/F /IM LayoutFix.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  end;
-end;
-
-procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
-var
-  ResultCode: Integer;
-begin
-  if CurUninstallStep = usUninstall then
-  begin
-    Exec('taskkill.exe', '/F /IM LayoutFix.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  end;
-end;

@@ -3,13 +3,14 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>1.0.10</Version>
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="LLamaSharp" Version="0.27.0" />
-    <PackageReference Include="LLamaSharp.Backend.Vulkan" Version="0.27.0" />
+    <EmbeddedResource Include="Resources\technical-tokens.txt"
+                      LogicalName="LayoutFix.Core.Resources.technical-tokens.txt" />
+    <EmbeddedResource Include="Resources\frequent-source-tokens.txt"
+                      LogicalName="LayoutFix.Core.Resources.frequent-source-tokens.txt" />
   </ItemGroup>
 
 </Project>
