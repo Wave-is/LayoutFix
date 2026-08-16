@@ -224,6 +224,61 @@ public class OfflineTranslationResultGuardTests
         Assert.Empty(translation);
     }
 
+    [Theory]
+    [InlineData(
+        "Do not restart the computer until the update finishes.",
+        "Не перезавантажуйте комп'ютер до завершення оновлення.",
+        "uk")]
+    [InlineData(
+        "Do not reboot the computer until the update finishes.",
+        "Не перезагружайте компьютер до завершения обновления.",
+        "ru")]
+    [InlineData(
+        "Не перезапускайте компьютер до завершения обновления.",
+        "Do not restart the computer until the update finishes.",
+        "en")]
+    public void TryAccept_AcceptsPreservedRestartConcept(
+        string source,
+        string rawTranslation,
+        string targetLanguage)
+    {
+        var accepted = OfflineTranslationResultGuard.TryAccept(
+            source,
+            targetLanguage,
+            rawTranslation,
+            out _);
+
+        Assert.True(accepted);
+    }
+
+    [Theory]
+    [InlineData(
+        "Do not restart the computer until the update finishes.",
+        "Не запускайте комп'ютер до завершення оновлення.",
+        "uk")]
+    [InlineData(
+        "Do not reboot the computer until the update finishes.",
+        "Не запускайте компьютер до завершения обновления.",
+        "ru")]
+    [InlineData(
+        "Не перезапускайте компьютер до завершения обновления.",
+        "Do not start the computer until the update finishes.",
+        "en")]
+    public void TryAccept_RejectsLostRestartConcept(
+        string source,
+        string rawTranslation,
+        string targetLanguage)
+    {
+        var accepted = OfflineTranslationResultGuard.TryAccept(
+            source,
+            targetLanguage,
+            rawTranslation,
+            out var translation);
+
+        Assert.False(accepted);
+        Assert.Empty(translation);
+    }
+
     [Fact]
     public void TryAccept_IgnoresNegationInsideProtectedCode()
     {

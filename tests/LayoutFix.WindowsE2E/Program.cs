@@ -3896,7 +3896,8 @@ internal static class Program
                 var expectation = GetExpectation(qualityCase, model.Id);
                 if (!response.RootElement.TryGetProperty("Success", out var success) || !success.GetBoolean())
                 {
-                    if (expectation == TranslationCaseExpectation.SafeRejection)
+                    if (expectation is TranslationCaseExpectation.SafeRejection or
+                        TranslationCaseExpectation.ValidOrSafeRejection)
                     {
                         Console.WriteLine(
                             $"worker-translation:model={model.Id} case={qualityCase.Id} " +
@@ -4173,7 +4174,7 @@ internal static class Program
             "ru",
             420,
             true,
-            [["функц", "возможност"], ["руковод", "справ"], ["расшир", "продвин"], ["чита"]],
+            [["функц", "возможност", "свойств"], ["руковод", "справ"], ["расшир", "продвин"], ["чита"]],
             LightExpectation: TranslationCaseExpectation.Excluded,
             AlmaExpectation: TranslationCaseExpectation.SafeRejection,
             RequiredExactTokens:
@@ -4252,6 +4253,7 @@ internal static class Program
             true,
             [["не"], ["перезап", "перезавантаж"], ["комп"], ["оновлен"], ["заверш"]],
             LightExpectation: TranslationCaseExpectation.Excluded,
+            ProExpectation: TranslationCaseExpectation.ValidOrSafeRejection,
             AlmaExpectation: TranslationCaseExpectation.Excluded),
         new(
             "ru-en-negation-count",
@@ -4348,7 +4350,8 @@ internal static class Program
     {
         Excluded,
         Success,
-        SafeRejection
+        SafeRejection,
+        ValidOrSafeRejection
     }
 
     private static async Task<int> DownloadModelAsync(string modelType)

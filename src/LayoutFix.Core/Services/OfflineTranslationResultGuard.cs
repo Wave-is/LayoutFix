@@ -110,6 +110,12 @@ public static class OfflineTranslationResultGuard
     private static readonly Regex CyrillicNegationResultPattern = new(
         @"(?<![\p{L}])(?:не|ні|нет|немає|никогда|ніколи|без)(?![\p{L}])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    private static readonly Regex EnglishRestartConceptPattern = new(
+        @"(?<![\p{L}])(?:restart(?:s|ed|ing)?|reboot(?:s|ed|ing)?)(?![\p{L}])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    private static readonly Regex CyrillicRestartConceptPattern = new(
+        @"(?:перезап|перезавантаж|перезагру[зж])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
     private static readonly Regex StrongProperNamePredicatePattern = new(
         @"^[ \t]+(?:will[ \t]+(?:call|contact|email|meet|message|visit|write)|(?:lives|works)[ \t]+(?:at|for|in)|(?:asked|replied|said|says)\b)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
@@ -178,6 +184,15 @@ public static class OfflineTranslationResultGuard
             return false;
         }
 
+        if (!PreservesCriticalActionConcepts(
+            sourceText,
+            targetLanguageCode,
+            naturalLanguageTranslation))
+        {
+            translation = string.Empty;
+            return false;
+        }
+
         if (targetLanguageCode is "ru" or "uk")
         {
             if (!PreservesLikelyLatinProperNames(sourceText, naturalLanguageTranslation))
@@ -234,6 +249,32 @@ public static class OfflineTranslationResultGuard
         return targetLanguageCode == "en"
             ? EnglishNegationResultPattern.IsMatch(naturalLanguageTranslation)
             : CyrillicNegationResultPattern.IsMatch(naturalLanguageTranslation);
+    }
+
+    private static bool PreservesCriticalActionConcepts(
+        string sourceText,
+        string targetLanguageCode,
+        string naturalLanguageTranslation)
+    {
+        if (targetLanguageCode is not ("ru" or "uk" or "en"))
+            return true;
+
+        var sourceProse = RemoveProtectedTokens(
+            sourceText,
+            ExtractProtectedTokens(sourceText));
+        if (EnglishRestartConceptPattern.IsMatch(sourceProse) &&
+            targetLanguageCode is "ru" or "uk")
+        {
+            return CyrillicRestartConceptPattern.IsMatch(naturalLanguageTranslation);
+        }
+
+        if (CyrillicRestartConceptPattern.IsMatch(sourceProse) &&
+            targetLanguageCode == "en")
+        {
+            return EnglishRestartConceptPattern.IsMatch(naturalLanguageTranslation);
+        }
+
+        return true;
     }
 
     private static bool PreservesLikelyLatinProperNames(
