@@ -7,11 +7,7 @@
     <a href="#русский">Русский</a> •
     <a href="#українська">Українська</a>
   </p>
-  <br>
-  <i>v1.0.12 release candidate: manual correction is the primary stable workflow; automatic correction is opt-in.</i>
 </div>
-
-See [v1.0.12 release notes](RELEASE_NOTES_v1.0.12.md) for the verified scope, upgrade notes, and known limitations. Current verification evidence and the still-open Windows/Adobe release gates are tracked in [READINESS.md](READINESS.md).
 
 <br>
 
