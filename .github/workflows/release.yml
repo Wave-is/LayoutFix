@@ -20,6 +20,18 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - name: Configure E2E keyboard layouts
+        shell: pwsh
+        run: |
+          $languages = New-WinUserLanguageList 'en-US'
+          $languages.Add((New-WinUserLanguageList 'ru-RU')[0])
+          Set-WinUserLanguageList -LanguageList $languages -Force
+          $inputMethods = @(Get-WinUserLanguageList | ForEach-Object InputMethodTips)
+          if ($inputMethods -notcontains '0409:00000409' -or
+              $inputMethods -notcontains '0419:00000419') {
+            throw "Required en-US and ru-RU keyboard layouts were not configured."
+          }
+
       - name: Verify release version
         shell: pwsh
         run: |
