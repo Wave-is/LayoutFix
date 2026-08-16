@@ -13,18 +13,6 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$resolvedCompilerPath = if ([string]::IsNullOrWhiteSpace($CompilerPath)) {
-    [IO.Path]::GetFullPath((Join-Path $workspace '.tools\inno7\ISCC.exe'))
-}
-elseif ([IO.Path]::IsPathRooted($CompilerPath)) {
-    [IO.Path]::GetFullPath($CompilerPath)
-}
-else {
-    [IO.Path]::GetFullPath((Join-Path $workspace $CompilerPath))
-}
-if (-not (Test-Path -LiteralPath $resolvedCompilerPath -PathType Leaf)) {
-    throw "Inno Setup compiler is missing: $resolvedCompilerPath"
-}
 $artifacts = (Resolve-Path (Join-Path $workspace 'artifacts')).Path
 $testDirectory = [IO.Path]::GetFullPath((Join-Path $artifacts "installer-e2e-$Version"))
 $requiredPrefix = $artifacts + [IO.Path]::DirectorySeparatorChar
@@ -36,6 +24,19 @@ if (Test-Path -LiteralPath $testDirectory) {
 }
 if (@(Get-Process -Name $ProtectedProcessName -ErrorAction SilentlyContinue).Count -ne 0) {
     throw "Installer E2E refuses to close or replace an existing $ProtectedProcessName session."
+}
+
+$resolvedCompilerPath = if ([string]::IsNullOrWhiteSpace($CompilerPath)) {
+    [IO.Path]::GetFullPath((Join-Path $workspace '.tools\inno7\ISCC.exe'))
+}
+elseif ([IO.Path]::IsPathRooted($CompilerPath)) {
+    [IO.Path]::GetFullPath($CompilerPath)
+}
+else {
+    [IO.Path]::GetFullPath((Join-Path $workspace $CompilerPath))
+}
+if (-not (Test-Path -LiteralPath $resolvedCompilerPath -PathType Leaf)) {
+    throw "Inno Setup compiler is missing: $resolvedCompilerPath"
 }
 
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
