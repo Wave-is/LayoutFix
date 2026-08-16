@@ -5282,20 +5282,30 @@ internal static class Program
                     return;
                 }
 
-                SendExternalKeys((ushort)'Y', (ushort)'T', (ushort)'N', 0x20);
+                SendExternalKeys(
+                    (ushort)'G',
+                    (ushort)'H',
+                    (ushort)'B',
+                    (ushort)'D',
+                    (ushort)'T',
+                    (ushort)'N',
+                    0x20);
                 deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
-                while (DateTime.UtcNow < deadline && editor.Text != "The' tls ofc yt ykj ytn_ nfr нет ")
+                while (DateTime.UtcNow < deadline && editor.Text != "The' tls ofc yt ykj ytn_ nfr привет ")
                     await Task.Delay(25);
 
-                if (editor.Text != "The' tls ofc yt ykj ytn_ nfr нет ")
+                if (editor.Text != "The' tls ofc yt ykj ytn_ nfr привет ")
                 {
+                    Console.Error.WriteLine(
+                        $"auto-correction:unambiguous-ru=" +
+                        JsonSerializer.Serialize(editor.Text));
                     result = 77;
                     return;
                 }
 
                 SendExternalKeys((ushort)'V', (ushort)'B', (ushort)'H', 0x20);
                 await Task.Delay(300);
-                if (editor.Text != "The' tls ofc yt ykj ytn_ nfr нет мир ")
+                if (editor.Text != "The' tls ofc yt ykj ytn_ nfr привет мир ")
                 {
                     Console.Error.WriteLine(
                         $"auto-correction:post-switch-text={JsonSerializer.Serialize(editor.Text)}");
