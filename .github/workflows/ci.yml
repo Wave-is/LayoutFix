@@ -129,6 +129,7 @@ jobs:
         shell: pwsh
         run: |
           $e2e = "tests\LayoutFix.WindowsE2E\bin\Release\net8.0-windows\win-x64\LayoutFix.WindowsE2E.exe"
+          $app = "src\LayoutFix\bin\Release\net8.0-windows\win-x64\LayoutFix.exe"
           & $e2e --clipboard-formats-test
           if ($LASTEXITCODE -ne 0) { throw "Clipboard formats E2E failed with $LASTEXITCODE." }
           & $e2e --secure-target-test
