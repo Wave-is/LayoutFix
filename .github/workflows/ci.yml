@@ -26,7 +26,7 @@ jobs:
           $languages = New-WinUserLanguageList 'en-US'
           $languages.Add((New-WinUserLanguageList 'ru-RU')[0])
           Set-WinUserLanguageList -LanguageList $languages -Force
-          $inputMethods = @(Get-WinUserLanguageList | ForEach-Object InputMethodTips)
+          $inputMethods = @(Get-WinUserLanguageList | ForEach-Object { $_.InputMethodTips })
           if ($inputMethods -notcontains '0409:00000409' -or
               $inputMethods -notcontains '0419:00000419') {
             throw "Required en-US and ru-RU keyboard layouts were not configured."
