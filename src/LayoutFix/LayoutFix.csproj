@@ -6,9 +6,6 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>1.0.10</Version>
-    <AssemblyVersion>1.0.10.0</AssemblyVersion>
-    <FileVersion>1.0.10.0</FileVersion>
     <ApplicationIcon>Resources\logo.ico</ApplicationIcon>
 
   </PropertyGroup>
@@ -20,29 +17,41 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Update="..\..\locales\*.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    <None Include="..\..\locales\*.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <Link>locales\%(Filename)%(Extension)</Link>
     </None>
-    <None Update="..\..\Sounds\*.wav">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    <None Include="..\..\Sounds\*.wav">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <Link>Sounds\%(Filename)%(Extension)</Link>
     </None>
-    <None Update="..\..\Dictionaries\*.txt">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    <!-- Prefer the frequency-preserving dictionaries maintained with the app.
+         The root directory still supplies languages for which only a compact
+         word list exists. Keeping frequencies in the release payload lets
+         automatic correction reject weak short-word coincidences. -->
+    <None Include="..\..\Dictionaries\*.txt"
+          Exclude="..\..\Dictionaries\bg.txt;..\..\Dictionaries\cs.txt;..\..\Dictionaries\de.txt;..\..\Dictionaries\el.txt;..\..\Dictionaries\en.txt;..\..\Dictionaries\es.txt;..\..\Dictionaries\fr.txt;..\..\Dictionaries\it.txt;..\..\Dictionaries\nl.txt;..\..\Dictionaries\pl.txt;..\..\Dictionaries\pt.txt;..\..\Dictionaries\ro.txt;..\..\Dictionaries\ru.txt;..\..\Dictionaries\sk.txt;..\..\Dictionaries\uk.txt">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <Link>Dictionaries\%(Filename)%(Extension)</Link>
     </None>
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="LLamaSharp" Version="0.27.0" />
-    <PackageReference Include="LLamaSharp.Backend.Vulkan" Version="0.27.0" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\LayoutFix.Core\LayoutFix.Core.csproj" />
     <ProjectReference Include="..\LayoutFix.Infrastructure\LayoutFix.Infrastructure.csproj" />
+    <!-- Build the native translation component without linking it into the tray
+         process. Its files are copied into a private subdirectory below. -->
+    <ProjectReference Include="..\LayoutFix.TranslationWorker\LayoutFix.TranslationWorker.csproj"
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all"
+                      GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained" />
   </ItemGroup>
 
   <ItemGroup>
@@ -50,7 +59,18 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Update="Dictionaries\**\*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </None>
+    <!-- Copy all frequency-preserving dictionaries plus the additional tracked
+         languages that extend detection beyond the compact root set. -->
+    <None Update="Dictionaries\bg.txt;Dictionaries\cs.txt;Dictionaries\de.txt;Dictionaries\el.txt;Dictionaries\en.txt;Dictionaries\es.txt;Dictionaries\fr.txt;Dictionaries\he.txt;Dictionaries\hy.txt;Dictionaries\it.txt;Dictionaries\ka.txt;Dictionaries\kk.txt;Dictionaries\nl.txt;Dictionaries\pl.txt;Dictionaries\pt.txt;Dictionaries\ro.txt;Dictionaries\ru.txt;Dictionaries\sk.txt;Dictionaries\sr.txt;Dictionaries\th.txt;Dictionaries\tr.txt;Dictionaries\uk.txt">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </None>
+    <None Update="locales\en.json;locales\ru.json;locales\uk.json">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
     </None>
   </ItemGroup>
 
@@ -59,5 +79,63 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+
+  <!-- dotnet publish does not remove stale files from an existing publish
+       directory. Never let local settings, history, logs, symbols, or native
+       libraries for another OS leak into a release package. -->
+  <Target Name="SanitizePublishedLayoutFix" AfterTargets="Publish">
+    <ItemGroup>
+      <PrivatePublishFile Include="$(PublishDir)settings.json" />
+      <PrivatePublishFile Include="$(PublishDir)translation_history.json" />
+      <PrivatePublishFile Include="$(PublishDir)layoutfix.log" />
+      <PrivatePublishFile Include="$(PublishDir)**\*.pdb" />
+      <PrivatePublishFile Include="$(PublishDir)LLamaSharp.dll" />
+      <PrivatePublishFile Include="$(PublishDir)CommunityToolkit.HighPerformance.dll" />
+      <PrivatePublishFile Include="$(PublishDir)Microsoft.Extensions.AI.Abstractions.dll" />
+      <PrivatePublishFile Include="$(PublishDir)System.Interactive.Async.dll" />
+      <PrivatePublishFile Include="$(PublishDir)System.Linq.Async.dll" />
+      <PrivatePublishFile Include="$(PublishDir)System.Linq.AsyncEnumerable.dll" />
+    </ItemGroup>
+    <Delete Files="@(PrivatePublishFile)" />
+    <RemoveDir Directories="$(PublishDir)runtimes;$(PublishDir)translation-worker" />
+  </Target>
+
+  <Target Name="CopyTranslationWorkerToOutput" AfterTargets="Build">
+    <PropertyGroup>
+      <TranslationWorkerOutput>$(MSBuildThisFileDirectory)..\LayoutFix.TranslationWorker\bin\$(Configuration)\net8.0-windows\</TranslationWorkerOutput>
+      <TranslationWorkerDestination>$(OutDir)translation-worker\</TranslationWorkerDestination>
+    </PropertyGroup>
+    <ItemGroup>
+      <TranslationWorkerRootFiles Include="$(TranslationWorkerOutput)*"
+                                  Exclude="$(TranslationWorkerOutput)*.pdb" />
+      <TranslationWorkerWindowsFiles Include="$(TranslationWorkerOutput)runtimes\win-x64\**\*" />
+    </ItemGroup>
+    <RemoveDir Directories="$(TranslationWorkerDestination)" />
+    <Copy SourceFiles="@(TranslationWorkerRootFiles)"
+          DestinationFiles="@(TranslationWorkerRootFiles->'$(TranslationWorkerDestination)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(TranslationWorkerWindowsFiles)"
+          DestinationFiles="@(TranslationWorkerWindowsFiles->'$(TranslationWorkerDestination)runtimes\win-x64\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyTranslationWorkerToPublish" AfterTargets="SanitizePublishedLayoutFix">
+    <PropertyGroup>
+      <TranslationWorkerOutput>$(MSBuildThisFileDirectory)..\LayoutFix.TranslationWorker\bin\$(Configuration)\net8.0-windows\</TranslationWorkerOutput>
+      <TranslationWorkerPublishDestination>$(PublishDir)translation-worker\</TranslationWorkerPublishDestination>
+    </PropertyGroup>
+    <ItemGroup>
+      <TranslationWorkerPublishRootFiles Include="$(TranslationWorkerOutput)*"
+                                         Exclude="$(TranslationWorkerOutput)*.pdb" />
+      <TranslationWorkerPublishWindowsFiles Include="$(TranslationWorkerOutput)runtimes\win-x64\**\*" />
+    </ItemGroup>
+    <RemoveDir Directories="$(TranslationWorkerPublishDestination)" />
+    <Copy SourceFiles="@(TranslationWorkerPublishRootFiles)"
+          DestinationFiles="@(TranslationWorkerPublishRootFiles->'$(TranslationWorkerPublishDestination)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(TranslationWorkerPublishWindowsFiles)"
+          DestinationFiles="@(TranslationWorkerPublishWindowsFiles->'$(TranslationWorkerPublishDestination)runtimes\win-x64\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

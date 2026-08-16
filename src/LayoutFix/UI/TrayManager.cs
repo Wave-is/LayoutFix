@@ -5,6 +5,7 @@ using System.Windows.Forms;
 using LayoutFix.Core.Interfaces;
 using LayoutFix.Core.Services;
 using LayoutFix.Infrastructure.Native;
+using LayoutFix.Services;
 
 namespace LayoutFix.UI;
 
@@ -13,17 +14,32 @@ public class TrayManager : IDisposable
     private readonly NotifyIcon _notifyIcon;
     private readonly ISettingsService _settingsService;
     private readonly IHotkeyCoordinator _hotkeyCoordinator;
+    private readonly SettingsWindowProvider _settingsWindowProvider;
+    private readonly ITranslatorWindowProvider _translatorWindowProvider;
+    private readonly HookRecoveryCoordinator _hookRecoveryCoordinator;
     private readonly System.Windows.Forms.Timer _layoutTimer;
     private string _lastLayout = string.Empty;
     private bool _lastUseFlagIcons = true;
     private bool _lastEnabled = true;
+    private ToolStripMenuItem? _autoCorrectionMenuItem;
+    private ToolStripMenuItem? _hookStatusMenuItem;
+    private bool _updatingMenuState;
+    private bool _disposed;
 
-    public TrayManager(ISettingsService settingsService, IHotkeyCoordinator hotkeyCoordinator)
+    public TrayManager(
+        ISettingsService settingsService,
+        IHotkeyCoordinator hotkeyCoordinator,
+        SettingsWindowProvider settingsWindowProvider,
+        ITranslatorWindowProvider translatorWindowProvider,
+        HookRecoveryCoordinator hookRecoveryCoordinator)
     {
         _settingsService = settingsService;
         _lastUseFlagIcons = _settingsService.Current.UseFlagIcons;
         _lastEnabled = _settingsService.Current.AutoConversionEnabled;
         _hotkeyCoordinator = hotkeyCoordinator;
+        _settingsWindowProvider = settingsWindowProvider;
+        _translatorWindowProvider = translatorWindowProvider;
+        _hookRecoveryCoordinator = hookRecoveryCoordinator;
 
         _notifyIcon = new NotifyIcon
         {
@@ -37,7 +53,9 @@ public class TrayManager : IDisposable
         _layoutTimer = new System.Windows.Forms.Timer { Interval = 300 };
         _layoutTimer.Tick += LayoutTimer_Tick;
         _layoutTimer.Start();
-        
+
+        _hookRecoveryCoordinator.OperationalStateChanged += HookRecovery_OperationalStateChanged;
+        UpdateHookStatusMenuItem();
         UpdateTrayIcon();
     }
 
@@ -51,9 +69,7 @@ public class TrayManager : IDisposable
 
     private void ShowSettings()
     {
-        var form = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<SettingsForm>(AppHost.Services!);
-        form.Show();
-        form.Activate();
+        _settingsWindowProvider.Show();
     }
 
     private void LayoutTimer_Tick(object? sender, EventArgs e)
@@ -67,6 +83,12 @@ public class TrayManager : IDisposable
             _lastLayout = currentLayout;
             _lastUseFlagIcons = currentUseFlags;
             _lastEnabled = currentEnabled;
+            if (_autoCorrectionMenuItem != null)
+            {
+                _updatingMenuState = true;
+                _autoCorrectionMenuItem.Checked = currentEnabled;
+                _updatingMenuState = false;
+            }
             UpdateTrayIcon();
         }
     }
@@ -95,6 +117,7 @@ public class TrayManager : IDisposable
 
         var text = string.IsNullOrEmpty(_lastLayout) ? "EN" : _lastLayout;
         if (text.Length > 2) text = text.Substring(0, 2);
+        text = text.ToUpperInvariant();
         
         bool isEnabled = _settingsService.Current.AutoConversionEnabled;
 
@@ -125,19 +148,55 @@ public class TrayManager : IDisposable
             graphics.DrawString(text, font, brush, x, y);
         }
 
-        // Draw status border
-        using (var borderPen = new Pen(isEnabled ? Color.Orange : Color.Gray, 1))
+        // Red means the input hooks are reconnecting. Otherwise orange means
+        // opt-in automatic correction is active and blue means manual mode.
+        var hooksOperational = _hookRecoveryCoordinator.IsOperational;
+        var borderColor = hooksOperational
+            ? (isEnabled ? Color.Orange : Color.DodgerBlue)
+            : Color.Crimson;
+        using (var borderPen = new Pen(borderColor, 1))
         {
             graphics.DrawRectangle(borderPen, 0, 0, size - 1, size - 1);
         }
 
-        var oldIcon = _notifyIcon.Icon;
-        _notifyIcon.Icon = Icon.FromHandle(bitmap.GetHicon());
-        
-        if (oldIcon != null)
+        var iconHandle = bitmap.GetHicon();
+        Icon newIcon;
+        try
         {
-            Win32.DestroyIcon(oldIcon.Handle);
-            oldIcon.Dispose();
+            using var temporaryIcon = Icon.FromHandle(iconHandle);
+            newIcon = (Icon)temporaryIcon.Clone();
+        }
+        finally
+        {
+            Win32.DestroyIcon(iconHandle);
+        }
+
+        var oldIcon = _notifyIcon.Icon;
+        _notifyIcon.Icon = newIcon;
+        _notifyIcon.Text = !hooksOperational
+            ? "LayoutFix — reconnecting input hooks"
+            : isEnabled
+                ? "LayoutFix — automatic correction on"
+                : "LayoutFix — manual correction active";
+        oldIcon?.Dispose();
+    }
+
+    private void HookRecovery_OperationalStateChanged(object? sender, EventArgs eventArgs)
+    {
+        if (_disposed)
+            return;
+
+        UpdateHookStatusMenuItem();
+        UpdateTrayIcon();
+    }
+
+    private void UpdateHookStatusMenuItem()
+    {
+        if (_hookStatusMenuItem != null)
+        {
+            _hookStatusMenuItem.Text = _hookRecoveryCoordinator.IsOperational
+                ? "Input hooks: active"
+                : "Input hooks: reconnecting…";
         }
     }
 
@@ -180,7 +239,31 @@ public class TrayManager : IDisposable
     private ContextMenuStrip CreateContextMenu()
     {
         var menu = new ContextMenuStrip();
-        
+
+        _hookStatusMenuItem = new ToolStripMenuItem
+        {
+            Enabled = false
+        };
+        menu.Items.Add(_hookStatusMenuItem);
+        menu.Items.Add(new ToolStripSeparator());
+
+        _autoCorrectionMenuItem = new ToolStripMenuItem("Automatic correction")
+        {
+            CheckOnClick = true,
+            Checked = _settingsService.Current.AutoConversionEnabled
+        };
+        _autoCorrectionMenuItem.CheckedChanged += (_, _) =>
+        {
+            if (_updatingMenuState) return;
+            _settingsService.Current.AutoConversionEnabled = _autoCorrectionMenuItem.Checked;
+            _settingsService.Save(_settingsService.Current);
+            _lastEnabled = _autoCorrectionMenuItem.Checked;
+            UpdateTrayIcon();
+        };
+        menu.Items.Add(_autoCorrectionMenuItem);
+        menu.Items.Add("Undo last auto-correction", null, async (s, e) =>
+            await _hotkeyCoordinator.ExecuteActionAsync(LayoutFix.Core.Models.HotkeyAction.Undo));
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Translator...", null, (s, e) => OpenTranslator());
         menu.Items.Add("Settings...", null, (s, e) => ShowSettings());
         menu.Items.Add("About...", null, (s, e) => ShowSettings()); // Assuming About is a tab in Settings
@@ -192,12 +275,14 @@ public class TrayManager : IDisposable
 
     private void OpenTranslator()
     {
-        var translatorProvider = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<ITranslatorWindowProvider>(AppHost.Services!);
-        translatorProvider.ShowTranslator();
+        _translatorWindowProvider.ShowTranslator();
     }
 
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
+        _hookRecoveryCoordinator.OperationalStateChanged -= HookRecovery_OperationalStateChanged;
         _layoutTimer.Stop();
         _layoutTimer.Dispose();
         _notifyIcon.Visible = false;

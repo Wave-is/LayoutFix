@@ -8,6 +8,8 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 using LayoutFix.Core.Interfaces;
 using LayoutFix.Core.Models;
+using LayoutFix.Core.Services;
+using LayoutFix.Infrastructure.Services;
 using LayoutFix.UI.Controls;
 
 namespace LayoutFix.UI;
@@ -17,8 +19,13 @@ public class SettingsForm : Form
     public class LangItem { public string Code { get; set; } = ""; public string Name { get; set; } = ""; }
 
     private readonly ISettingsService _settingsService;
-    private readonly IAutoStartService _autoStartService;
     private readonly ILocalizationService _locService;
+    private readonly ILoggerService _logger;
+    private readonly ModelDownloadService _modelDownloadService;
+    private readonly ITranslationHistoryService _translationHistoryService;
+    private readonly ITranslationCredentialStore _translationCredentials;
+    private readonly LayoutFix.Services.SettingsPersistenceCoordinator _persistenceCoordinator;
+    private readonly CancellationTokenSource _lifetimeCancellation = new();
     private AppSettings _currentSettings;
 
     // UI Panels
@@ -43,12 +50,26 @@ public class SettingsForm : Form
     private Color _textColor = Color.White;
     private Color _accentColor = Color.FromArgb(0, 120, 215);
 
-    public SettingsForm(ISettingsService settingsService, IAutoStartService autoStartService, ILocalizationService locService)
+    public SettingsForm(
+        ISettingsService settingsService,
+        IAutoStartService autoStartService,
+        ILocalizationService locService,
+        ILoggerService logger,
+        ModelDownloadService modelDownloadService,
+        ITranslationHistoryService translationHistoryService,
+        ITranslationCredentialStore translationCredentials)
     {
         _settingsService = settingsService;
-        _autoStartService = autoStartService;
         _locService = locService;
+        _logger = logger;
+        _modelDownloadService = modelDownloadService;
+        _translationHistoryService = translationHistoryService;
+        _translationCredentials = translationCredentials;
         _currentSettings = _settingsService.Current;
+        _persistenceCoordinator = new LayoutFix.Services.SettingsPersistenceCoordinator(
+            _settingsService,
+            autoStartService,
+            _currentSettings.AutoStart);
 
         InitializeComponent();
         this.Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -64,7 +85,7 @@ public class SettingsForm : Form
     private void InitializeComponent()
     {
         this.Text = _locService.GetString("Settings_Title", "LayoutFix");
-        this.Size = new Size(850, 600);
+        this.Size = new Size(1050, 650);
         this.StartPosition = FormStartPosition.CenterScreen;
         this.Font = new Font("Segoe UI", 10F);
         this.FormBorderStyle = FormBorderStyle.None;
@@ -107,14 +128,44 @@ public class SettingsForm : Form
 
         this.FormClosing += (s, e) =>
         {
-            SaveSettings();
+            _lifetimeCancellation.Cancel();
+            if (_persistenceCoordinator.HasPendingChanges)
+                SaveSettings(retryPendingOnly: true);
         };
     }
 
-    private void SaveSettings()
+    private void SaveSettings(bool retryPendingOnly = false)
     {
-        _settingsService.Save(_currentSettings);
-        _autoStartService.IsAutoStartEnabled = _currentSettings.AutoStart;
+        try
+        {
+            if (retryPendingOnly)
+                _persistenceCoordinator.RetryPending(_currentSettings);
+            else
+                _persistenceCoordinator.Save(_currentSettings);
+        }
+        catch (LayoutFix.Services.SettingsPersistenceException ex)
+        {
+            _logger.LogError(ex.SafeLogMessage, ex);
+            ShowSettingsSaveError();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                "DiagnosticCode: LF-ST-003 | Action: settings-save | Stage: unknown | Outcome: failed",
+                ex);
+            ShowSettingsSaveError();
+        }
+    }
+
+    private void ShowSettingsSaveError()
+    {
+        MessageBox.Show(
+            _locService.GetString(
+                "Settings_SaveErrorMessage",
+                "Settings could not be saved. Check file and Windows startup permissions."),
+            _locService.GetString("Settings_SaveErrorTitle", "Settings not saved"),
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Error);
     }
 
     private void ApplyTheme()
@@ -249,6 +300,8 @@ public class SettingsForm : Form
             
             targetPanel.Visible = true;
             targetPanel.BringToFront();
+            ResetScrollPositions(targetPanel);
+            targetPanel.BeginInvoke(() => ResetScrollPositions(targetPanel));
 
             btn.ForeColor = Color.White;
             btn.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
@@ -259,6 +312,15 @@ public class SettingsForm : Form
         _pnlSidebar.Controls.Add(btn);
         btn.BringToFront();
         return btn;
+    }
+
+    private static void ResetScrollPositions(Control root)
+    {
+        if (root is ScrollableControl scrollable && scrollable.AutoScroll)
+            scrollable.AutoScrollPosition = Point.Empty;
+
+        foreach (Control child in root.Controls)
+            ResetScrollPositions(child);
     }
 
     private void InitializeTabs()
@@ -296,15 +358,21 @@ public class SettingsForm : Form
         pnl.Controls.Add(lblTitle);
         y += 50;
 
-        pnl.Controls.Add(CreateToggleSetting("Automatic Conversion", _currentSettings.AutoConversionEnabled, v => { _currentSettings.AutoConversionEnabled = v; SaveSettings(); }, y)); y += 50;
-        pnl.Controls.Add(CreateToggleSetting("Start on Boot", _currentSettings.AutoStart, v => { _currentSettings.AutoStart = v; SaveSettings(); }, y)); y += 50;
-        pnl.Controls.Add(CreateToggleSetting("Enable Sound Notifications", _currentSettings.SoundEnabled, v => { _currentSettings.SoundEnabled = v; SaveSettings(); }, y)); y += 50;
-        pnl.Controls.Add(CreateToggleSetting("Show Country Flags in Tray", _currentSettings.UseFlagIcons, v => { _currentSettings.UseFlagIcons = v; SaveSettings(); }, y)); y += 50;
+        pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_AutoConv", "Enable automatic correction while typing"), _currentSettings.AutoConversionEnabled, v => { _currentSettings.AutoConversionEnabled = v; SaveSettings(); }, y)); y += 50;
+        pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_AutoStart", "Start with Windows"), _currentSettings.AutoStart, v => { _currentSettings.AutoStart = v; SaveSettings(); }, y)); y += 50;
+        pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_Sound", "Enable sound notifications"), _currentSettings.SoundEnabled, v => { _currentSettings.SoundEnabled = v; SaveSettings(); }, y)); y += 50;
+        pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_Flags", "Use country flags in tray"), _currentSettings.UseFlagIcons, v => { _currentSettings.UseFlagIcons = v; SaveSettings(); }, y)); y += 50;
+        pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_Logging", "Diagnostic logging"), _currentSettings.LoggingEnabled, v => { _currentSettings.LoggingEnabled = v; SaveSettings(); }, y)); y += 50;
 
-        var pnlTheme = new Panel { Width = 500, Height = 40, Location = new Point(0, y) };
-        var lblTheme = new Label { Text = "Color Theme", ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
-        var cmbTheme = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(350, 8), BackColor = _sidebarColor, ForeColor = _textColor };
-        cmbTheme.Items.AddRange(new[] { "Auto", "Light", "Dark" });
+        var pnlTheme = new Panel { Width = 740, Height = 40, Location = new Point(0, y) };
+        var lblTheme = new Label { Text = _locService.GetString("Settings_Theme", "Color theme"), ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
+        var cmbTheme = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(590, 8), BackColor = _sidebarColor, ForeColor = _textColor };
+        cmbTheme.Items.AddRange(new[]
+        {
+            _locService.GetString("Settings_ThemeAuto", "Follow Windows"),
+            _locService.GetString("Settings_ThemeLight", "Light"),
+            _locService.GetString("Settings_ThemeDark", "Dark")
+        });
         cmbTheme.SelectedIndex = _currentSettings.AppTheme switch { "Dark" => 2, "Light" => 1, _ => 0 };
         cmbTheme.SelectedIndexChanged += (s, e) =>
         {
@@ -318,9 +386,9 @@ public class SettingsForm : Form
         pnl.Controls.Add(pnlTheme);
         y += 50;
 
-        var pnlLang = new Panel { Width = 500, Height = 40, Location = new Point(0, y) };
-        var lblLang = new Label { Text = "Interface Language", ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
-        var cmbLang = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(350, 8), BackColor = _sidebarColor, ForeColor = _textColor };
+        var pnlLang = new Panel { Width = 740, Height = 40, Location = new Point(0, y) };
+        var lblLang = new Label { Text = _locService.GetString("Settings_InterfaceLanguage", "Interface language"), ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
+        var cmbLang = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(590, 8), BackColor = _sidebarColor, ForeColor = _textColor };
         
         var locales = new LangItem[] {
             new LangItem{ Code="en", Name="English" }, new LangItem{ Code="ru", Name="Русский" }, new LangItem{ Code="uk", Name="Українська" },
@@ -344,7 +412,13 @@ public class SettingsForm : Form
                 _currentSettings.UiLanguage = code;
                 _locService.SetCulture(code);
                 SaveSettings();
-                MessageBox.Show("Language changed. Please restart the application to apply all changes.", "Restart Required", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(
+                    _locService.GetString(
+                        "Settings_RestartRequiredMessage",
+                        "Language changed. Restart LayoutFix to apply all changes."),
+                    _locService.GetString("Settings_RestartRequired", "Restart required"),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
             }
         };
 
@@ -357,9 +431,9 @@ public class SettingsForm : Form
 
     private Panel CreateToggleSetting(string title, bool initialValue, Action<bool> onChanged, int y)
     {
-        var pnl = new Panel { Width = 500, Height = 40, Location = new Point(0, y) };
+        var pnl = new Panel { Width = 740, Height = 40, Location = new Point(0, y) };
         var lbl = new Label { Text = title, ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
-        var sw = new ToggleSwitch { Checked = initialValue, Location = new Point(450, 5), BackColor = _bgColor };
+        var sw = new ToggleSwitch { Checked = initialValue, Location = new Point(690, 5), BackColor = _bgColor };
         sw.CheckedChanged += (s, e) => onChanged(sw.Checked);
         
         pnl.Controls.Add(lbl);
@@ -400,6 +474,20 @@ public class SettingsForm : Form
 
         int y = 50;
 
+        var useWindowsLayouts = CreateToggleSetting(
+            _locService.GetString(
+                "Settings_UseWindowsLayouts",
+                "Use installed Windows keyboard layouts"),
+            _currentSettings.UseWindowsLayoutList,
+            value =>
+            {
+                _currentSettings.UseWindowsLayoutList = value;
+                SaveSettings();
+            },
+            y);
+        pnl.Controls.Add(useWindowsLayouts);
+        y += 50;
+
         foreach (InputLanguage lang in InputLanguage.InstalledInputLanguages)
         {
             // Filter ghost layouts from GetKeyboardLayoutList using Preload registry
@@ -415,22 +503,34 @@ public class SettingsForm : Form
             }
 
             string name = lang.Culture?.EnglishName ?? lang.LayoutName;
-            bool isActive = !_currentSettings.DisabledLanguages.Contains(name);
+            var layout = new Layout
+            {
+                Code = lang.Culture?.Name ?? string.Empty,
+                Identifier = KeyboardLayoutIdentity.Create(
+                    lang.Culture?.Name ?? string.Empty,
+                    lang.Handle.ToInt64()),
+                DisplayName = name
+            };
+            bool isActive = !KeyboardLayoutPreferences.IsDisabled(
+                layout,
+                _currentSettings.DisabledLanguages);
 
             var card = new CardPanel { Width = 500, Height = 70, Location = new Point(0, y) };
             
             var lblName = new Label { Text = name, ForeColor = _textColor, Font = new Font("Segoe UI", 12, FontStyle.Bold), AutoSize = true, Location = new Point(60, 15), BackColor = Color.Transparent };
-            var lblLayout = new Label { Text = "Keyboard: " + lang.LayoutName, ForeColor = Color.Gray, Font = new Font("Segoe UI", 9), AutoSize = true, Location = new Point(60, 38), BackColor = Color.Transparent };
+            var lblLayout = new Label { Text = _locService.GetString("Settings_KeyboardPrefix", "Keyboard:") + " " + lang.LayoutName, ForeColor = Color.Gray, Font = new Font("Segoe UI", 9), AutoSize = true, Location = new Point(60, 38), BackColor = Color.Transparent };
 
             var sw = new ToggleSwitch { Checked = isActive, Location = new Point(430, 22), BackColor = card.CardBackColor };
             sw.CheckedChanged += (s, e) =>
             {
-                if (sw.Checked) _currentSettings.DisabledLanguages.Remove(name);
-                else if (!_currentSettings.DisabledLanguages.Contains(name)) _currentSettings.DisabledLanguages.Add(name);
+                if (sw.Checked)
+                    KeyboardLayoutPreferences.Enable(_currentSettings, layout);
+                else
+                    KeyboardLayoutPreferences.Disable(_currentSettings, layout);
                 SaveSettings();
             };
 
-            var lblActive = new Label { Text = "Active", ForeColor = _accentColor, Font = new Font("Segoe UI", 10), AutoSize = true, Location = new Point(370, 25), BackColor = Color.Transparent };
+            var lblActive = new Label { Text = _locService.GetString("Settings_Active", "Active"), ForeColor = _accentColor, Font = new Font("Segoe UI", 10), AutoSize = true, Location = new Point(370, 25), BackColor = Color.Transparent };
             
             string isoCode = lang.Culture?.TwoLetterISOLanguageName.ToUpperInvariant() ?? "??";
             var pnlFlag = new Label { Text = isoCode, Width = 34, Height = 22, Location = new Point(15, 24), BackColor = _accentColor, ForeColor = Color.White, Font = new Font("Segoe UI", 9, FontStyle.Bold), TextAlign = ContentAlignment.MiddleCenter };
@@ -445,15 +545,25 @@ public class SettingsForm : Form
 
     private void BuildHotkeysTab()
     {
-        var pnl = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
-        var lblTitle = new Label { Text = _locService.GetString("Settings_Hotkeys", "Global Shortcuts"), ForeColor = _textColor, Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Top };
+        // The table fits in the fixed settings window. AutoScroll caused WinForms
+        // to shift the entire tab when a child received focus, placing the title
+        // and table underneath the custom top bar.
+        var pnl = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 50, 0, 0) };
+        var lblTitle = new Label
+        {
+            Text = _locService.GetString("Settings_Hotkeys", "Global Shortcuts"),
+            ForeColor = _textColor,
+            Font = new Font("Segoe UI", 18, FontStyle.Bold),
+            AutoSize = true,
+            Location = Point.Empty
+        };
         
         var tlp = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             AutoSize = true,
             ColumnCount = 7,
-            RowCount = 9,
+            RowCount = 10,
             CellBorderStyle = TableLayoutPanelCellBorderStyle.Single,
             Padding = new Padding(0, 10, 0, 0)
         };
@@ -462,12 +572,12 @@ public class SettingsForm : Form
         
         tlp.SuspendLayout();
         
-        tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 31F));
-        tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 23F));
+        tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 26F));
+        tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 24.666F));
         tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 35F));
-        tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 23F));
+        tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 24.667F));
         tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 35F));
-        tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 23F));
+        tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 24.667F));
         tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 35F));
 
         // Header Row
@@ -498,6 +608,7 @@ public class SettingsForm : Form
         AddTlpRow(tlp, 6, "Translate2", _locService.GetString("Settings_TranslateLang2", "Translate to Lang 2 (En)"), "Alt+T", "", "");
         AddTlpRow(tlp, 7, "Translate3", _locService.GetString("Settings_TranslateLang3", "Translate to Lang 3"), "Ctrl+Alt+T", "", "");
         AddTlpRow(tlp, 8, "OpenTranslator", _locService.GetString("Settings_OpenTranslator", "Open Translator"), "Ctrl+Shift+T", "", "");
+        AddTlpRow(tlp, 9, "Undo", _locService.GetString("Settings_UndoAutoCorrection", "Undo last auto-correction"), "Ctrl+Shift+Backspace", "", "");
 
         tlp.ResumeLayout(false);
         tlp.PerformLayout();
@@ -527,7 +638,13 @@ public class SettingsForm : Form
         }
         if (config == null)
         {
-            config = new HotkeyConfig { Action = action, Hotkey = expectedHotkey, Preset = preset, Enabled = true };
+            config = new HotkeyConfig
+            {
+                Action = action,
+                Hotkey = expectedHotkey,
+                Preset = preset,
+                Enabled = !string.IsNullOrWhiteSpace(expectedHotkey)
+            };
             _currentSettings.HotkeyConfigs.Add(config);
         }
 
@@ -548,6 +665,11 @@ public class SettingsForm : Form
             using var editor = new HotkeyEditorForm(config.Hotkey, action);
             if (editor.ShowDialog(this) == DialogResult.OK)
             {
+                if (HasHotkeyConflict(config, editor.ResultHotkey))
+                {
+                    ShowHotkeyConflict(editor.ResultHotkey);
+                    return;
+                }
                 config.Hotkey = editor.ResultHotkey;
                 btn.Text = config.Hotkey;
                 SaveSettings();
@@ -555,11 +677,40 @@ public class SettingsForm : Form
         };
 
         var chk = new CheckBox { Checked = config.Enabled, CheckAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill, Tag = config };
-        chk.CheckedChanged += (s, e) => { config.Enabled = chk.Checked; SaveSettings(); };
+        chk.CheckedChanged += (s, e) =>
+        {
+            if (chk.Checked && HasHotkeyConflict(config, config.Hotkey))
+            {
+                ShowHotkeyConflict(config.Hotkey);
+                chk.Checked = false;
+                return;
+            }
+
+            config.Enabled = chk.Checked;
+            SaveSettings();
+        };
 
         tlp.Controls.Add(btn, textCol, row);
         tlp.Controls.Add(chk, chkCol, row);
     }
+
+    private bool HasHotkeyConflict(HotkeyConfig current, string hotkey)
+    {
+        var candidate = HotkeyCombo.Parse(hotkey);
+        return _currentSettings.HotkeyConfigs.Any(other =>
+            !ReferenceEquals(other, current) &&
+            other.Enabled &&
+            candidate.Matches(HotkeyCombo.Parse(other.Hotkey)));
+    }
+
+    private void ShowHotkeyConflict(string hotkey) => MessageBox.Show(
+        this,
+        _locService.GetString(
+            "Settings_HotkeyConflictMessage",
+            "This shortcut is already assigned to another enabled action.") + $"\n\n{hotkey}",
+        _locService.GetString("Settings_HotkeyConflictTitle", "Shortcut conflict"),
+        MessageBoxButtons.OK,
+        MessageBoxIcon.Warning);
 
     private void ToggleSet(int preset, bool enable, TableLayoutPanel tlp)
     {
@@ -575,68 +726,256 @@ public class SettingsForm : Form
     }
 
     private ListBox _lstExceptions = null!;
+    private ListBox _lstAutoConversionExceptions = null!;
+
     private void BuildExceptionsTab()
     {
-        var pnl = new Panel { Dock = DockStyle.Fill };
-        var lblTitle = new Label { Text = _locService.GetString("Settings_Exceptions", "App Exceptions"), ForeColor = _textColor, Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Top };
-        
-        var pnlAdd = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(0, 10, 0, 0) };
-        var txtAdd = new TextBox { Width = 300, Location = new Point(0, 10), BackColor = _sidebarColor, ForeColor = _textColor, Font = new Font("Segoe UI", 11) };
-        var btnAdd = new Button { Text = "Add", Location = new Point(310, 9), Width = 80, Height = 28, BackColor = _accentColor, ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
-        btnAdd.FlatAppearance.BorderSize = 0;
-        
-        btnAdd.Click += (s, e) =>
+        var lblTitle = new Label
         {
-            string w = txtAdd.Text.Trim();
-            if (!string.IsNullOrEmpty(w) && !_currentSettings.BlacklistedProcesses.Contains(w, StringComparer.OrdinalIgnoreCase))
-            {
-                _currentSettings.BlacklistedProcesses.Add(w);
-                _lstExceptions.Items.Add(w);
-                txtAdd.Clear();
-                SaveSettings();
-            }
+            Text = _locService.GetString("Settings_Exceptions", "App Exceptions"),
+            ForeColor = _textColor,
+            Font = new Font("Segoe UI", 18, FontStyle.Bold),
+            AutoSize = true,
+            Location = new Point(0, 0)
         };
 
-        var btnRemove = new Button { Text = "Remove", Location = new Point(400, 9), Width = 80, Height = 28, BackColor = Color.FromArgb(200, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
-        btnRemove.FlatAppearance.BorderSize = 0;
-        btnRemove.Click += (s, e) =>
+        var layout = new TableLayoutPanel
         {
-            if (_lstExceptions.SelectedItem is string w)
-            {
-                _currentSettings.BlacklistedProcesses.Remove(w);
-                _lstExceptions.Items.Remove(w);
-                SaveSettings();
-            }
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 58));
+
+        var titlePanel = new Panel { Dock = DockStyle.Fill };
+        titlePanel.Controls.Add(lblTitle);
+
+        var allActionsPanel = CreateProcessExceptionEditor(
+            _locService.GetString("Settings_AllActionsExclusions", "All LayoutFix actions"),
+            _locService.GetString(
+                "Settings_AppExceptionsDescription",
+                "Manual hotkeys and automatic correction stay disabled in these processes."),
+            _currentSettings.BlacklistedProcesses,
+            "GlobalProcessExclusions",
+            includeRestoreDefaults: false,
+            out _lstExceptions);
+
+        var autoCorrectionPanel = CreateProcessExceptionEditor(
+            _locService.GetString("Settings_AutoCorrectionExclusions", "Automatic correction only"),
+            _locService.GetString(
+                "Settings_AutoCorrectionExclusionsDescription",
+                "Typing is never changed automatically in these processes. Manual hotkeys remain available."),
+            _currentSettings.AutoConversionBlacklistedProcesses,
+            "AutoCorrectionProcessExclusions",
+            includeRestoreDefaults: true,
+            out _lstAutoConversionExceptions);
+
+        layout.Controls.Add(titlePanel, 0, 0);
+        layout.Controls.Add(allActionsPanel, 0, 1);
+        layout.Controls.Add(autoCorrectionPanel, 0, 2);
+        _tabExceptions.Controls.Add(layout);
+    }
+
+    private Panel CreateProcessExceptionEditor(
+        string title,
+        string description,
+        List<string> processes,
+        string accessiblePrefix,
+        bool includeRestoreDefaults,
+        out ListBox listBox)
+    {
+        var panel = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BorderStyle = BorderStyle.FixedSingle,
+            Padding = new Padding(12),
+            Margin = new Padding(0, 0, 0, 10)
+        };
+        var lblSectionTitle = new Label
+        {
+            Text = title,
+            Dock = DockStyle.Top,
+            Height = 28,
+            ForeColor = _textColor,
+            Font = new Font("Segoe UI", 11, FontStyle.Bold)
+        };
+        var lblDescription = new Label
+        {
+            Text = description,
+            Dock = DockStyle.Top,
+            Height = 38,
+            ForeColor = Color.Gray,
+            Font = new Font("Segoe UI", 9)
+        };
+        var actions = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            Height = 38,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Padding = new Padding(0, 5, 0, 0),
+            Margin = Padding.Empty
+        };
+        var txtAdd = new TextBox
+        {
+            Width = includeRestoreDefaults ? 190 : 300,
+            BackColor = _sidebarColor,
+            ForeColor = _textColor,
+            Font = new Font("Segoe UI", 10),
+            AccessibleName = accessiblePrefix + ".Input"
+        };
+        var btnAdd = CreateExceptionButton(
+            _locService.GetString("Settings_Add", "Add"),
+            _accentColor,
+            accessiblePrefix + ".Add");
+        var btnRemove = CreateExceptionButton(
+            _locService.GetString("Settings_Remove", "Remove"),
+            Color.FromArgb(200, 50, 50),
+            accessiblePrefix + ".Remove");
+
+        listBox = new ListBox
+        {
+            Dock = DockStyle.Fill,
+            BackColor = _sidebarColor,
+            ForeColor = _textColor,
+            BorderStyle = BorderStyle.None,
+            Font = new Font("Segoe UI", 10),
+            AccessibleName = accessiblePrefix + ".List"
+        };
+        foreach (var process in processes)
+            listBox.Items.Add(process);
+        var editorList = listBox;
+
+        void AddProcess()
+        {
+            var process = txtAdd.Text.Trim();
+            if (process.Length == 0 || processes.Contains(process, StringComparer.OrdinalIgnoreCase))
+                return;
+
+            processes.Add(process);
+            editorList.Items.Add(process);
+            txtAdd.Clear();
+            SaveSettings();
+        }
+
+        btnAdd.Click += (_, _) => AddProcess();
+        txtAdd.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode != Keys.Enter)
+                return;
+
+            AddProcess();
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+        };
+        btnRemove.Click += (_, _) =>
+        {
+            if (editorList.SelectedItem is not string process)
+                return;
+
+            processes.Remove(process);
+            editorList.Items.Remove(process);
+            SaveSettings();
         };
 
-        pnlAdd.Controls.AddRange(new Control[] { txtAdd, btnAdd, btnRemove });
+        actions.Controls.AddRange([txtAdd, btnAdd, btnRemove]);
+        if (includeRestoreDefaults)
+        {
+            var btnRestore = CreateExceptionButton(
+                _locService.GetString("Settings_RestoreSafetyDefaults", "Restore safety defaults"),
+                Color.FromArgb(72, 72, 76),
+                accessiblePrefix + ".RestoreDefaults",
+                width: 240);
+            btnRestore.Click += (_, _) =>
+            {
+                var changed = false;
+                foreach (var process in AppSettings.DefaultAutoConversionBlacklistedProcesses)
+                {
+                    if (processes.Contains(process, StringComparer.OrdinalIgnoreCase))
+                        continue;
 
-        _lstExceptions = new ListBox { Dock = DockStyle.Fill, BackColor = _sidebarColor, ForeColor = _textColor, BorderStyle = BorderStyle.None, Font = new Font("Segoe UI", 12) };
-        foreach (var proc in _currentSettings.BlacklistedProcesses) _lstExceptions.Items.Add(proc);
+                    processes.Add(process);
+                    editorList.Items.Add(process);
+                    changed = true;
+                }
 
-        var pnlList = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 10, 0, 0) };
-        pnlList.Controls.Add(_lstExceptions);
+                if (changed)
+                    SaveSettings();
+            };
+            actions.Controls.Add(btnRestore);
+        }
 
-        pnl.Controls.AddRange(new Control[] { pnlList, pnlAdd, lblTitle });
-        _tabExceptions.Controls.Add(pnl);
+        panel.Controls.Add(editorList);
+        panel.Controls.Add(actions);
+        panel.Controls.Add(lblDescription);
+        panel.Controls.Add(lblSectionTitle);
+        return panel;
+    }
+
+    private static Button CreateExceptionButton(
+        string text,
+        Color backColor,
+        string accessibleName,
+        int width = 80)
+    {
+        var button = new Button
+        {
+            Text = text,
+            Width = width,
+            Height = 28,
+            BackColor = backColor,
+            ForeColor = Color.White,
+            FlatStyle = FlatStyle.Flat,
+            AccessibleName = accessibleName,
+            Margin = new Padding(5, 0, 0, 0)
+        };
+        button.FlatAppearance.BorderSize = 0;
+        return button;
     }
 
     private ListBox _lstUserExceptions = null!;
     private TextBox _txtAddDict = null!;
+    private ListView _lstUserAutocorrect = null!;
     private void BuildDictionaryTab()
     {
         var pnl = new Panel { Dock = DockStyle.Fill };
         var lblTitle = new Label { Text = _locService.GetString("Settings_Dict", "Dictionary"), ForeColor = _textColor, Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Top };
-        
-        var pnlAdd = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(0, 10, 0, 0) };
-        _txtAddDict = new TextBox { Width = 300, Location = new Point(0, 10), BackColor = _sidebarColor, ForeColor = _textColor, Font = new Font("Segoe UI", 11) };
-        var btnAdd = new Button { Text = "Add", Location = new Point(310, 9), Width = 80, Height = 28, BackColor = _accentColor, ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+
+        var columns = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            Padding = new Padding(0, 12, 0, 0)
+        };
+        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
+        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
+
+        var exceptionsGroup = new GroupBox
+        {
+            Text = _locService.GetString("Settings_DictionaryExceptions", "Never auto-correct"),
+            Dock = DockStyle.Fill,
+            ForeColor = _textColor,
+            Font = new Font("Segoe UI", 11),
+            Padding = new Padding(10)
+        };
+        var exceptionsPanel = new Panel { Dock = DockStyle.Fill };
+        var pnlAdd = new TableLayoutPanel { Dock = DockStyle.Top, Height = 42, ColumnCount = 3 };
+        pnlAdd.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        pnlAdd.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 48));
+        pnlAdd.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 48));
+        _txtAddDict = new TextBox { Dock = DockStyle.Fill, Margin = new Padding(0, 9, 6, 3), BackColor = _sidebarColor, ForeColor = _textColor, Font = new Font("Segoe UI", 11) };
+        var btnAdd = new Button { Text = "+", Dock = DockStyle.Fill, Margin = new Padding(0, 8, 6, 4), BackColor = _accentColor, ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
         btnAdd.FlatAppearance.BorderSize = 0;
         
         btnAdd.Click += (s, e) =>
         {
             string w = _txtAddDict.Text.Trim().ToLower();
-            if (!string.IsNullOrEmpty(w) && !_currentSettings.UserExceptions.Contains(w))
+            if (!string.IsNullOrEmpty(w) && !_currentSettings.UserExceptions.Contains(w, StringComparer.OrdinalIgnoreCase))
             {
                 _currentSettings.UserExceptions.Add(w);
                 _lstUserExceptions.Items.Add(w);
@@ -645,7 +984,7 @@ public class SettingsForm : Form
             }
         };
 
-        var btnRemove = new Button { Text = "Remove", Location = new Point(400, 9), Width = 80, Height = 28, BackColor = Color.FromArgb(200, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        var btnRemove = new Button { Text = "−", Dock = DockStyle.Fill, Margin = new Padding(0, 8, 0, 4), BackColor = Color.FromArgb(200, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
         btnRemove.FlatAppearance.BorderSize = 0;
         btnRemove.Click += (s, e) =>
         {
@@ -657,18 +996,151 @@ public class SettingsForm : Form
             }
         };
 
-        pnlAdd.Controls.Add(_txtAddDict);
-        pnlAdd.Controls.Add(btnAdd);
-        pnlAdd.Controls.Add(btnRemove);
+        pnlAdd.Controls.Add(_txtAddDict, 0, 0);
+        pnlAdd.Controls.Add(btnAdd, 1, 0);
+        pnlAdd.Controls.Add(btnRemove, 2, 0);
 
         _lstUserExceptions = new ListBox { Dock = DockStyle.Fill, BackColor = _sidebarColor, ForeColor = _textColor, BorderStyle = BorderStyle.None, Font = new Font("Segoe UI", 12) };
         foreach (var w in _currentSettings.UserExceptions) _lstUserExceptions.Items.Add(w);
 
-        var pnlList = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 10, 0, 0) };
+        var pnlList = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 8, 0, 0) };
         pnlList.Controls.Add(_lstUserExceptions);
 
-        pnl.Controls.Add(pnlList);
-        pnl.Controls.Add(pnlAdd);
+        exceptionsPanel.Controls.Add(pnlList);
+        exceptionsPanel.Controls.Add(pnlAdd);
+        exceptionsGroup.Controls.Add(exceptionsPanel);
+
+        var autocorrectGroup = new GroupBox
+        {
+            Text = _locService.GetString("Settings_CustomReplacements", "Custom replacements"),
+            Dock = DockStyle.Fill,
+            ForeColor = _textColor,
+            Font = new Font("Segoe UI", 11),
+            Padding = new Padding(10)
+        };
+        var autocorrectPanel = new Panel { Dock = DockStyle.Fill };
+        var autocorrectAddPanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = 70,
+            ColumnCount = 3,
+            RowCount = 2
+        };
+        autocorrectAddPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        autocorrectAddPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        autocorrectAddPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
+
+        var sourceLabel = new Label
+        {
+            Text = _locService.GetString("Settings_ReplaceFrom", "Typed text"),
+            ForeColor = _textColor,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.BottomLeft
+        };
+        var replacementLabel = new Label
+        {
+            Text = _locService.GetString("Settings_ReplaceWith", "Replacement"),
+            ForeColor = _textColor,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.BottomLeft
+        };
+        var sourceText = new TextBox { Dock = DockStyle.Fill, BackColor = _sidebarColor, ForeColor = _textColor };
+        var replacementText = new TextBox { Dock = DockStyle.Fill, BackColor = _sidebarColor, ForeColor = _textColor };
+        var addReplacement = new Button
+        {
+            Text = _locService.GetString("Settings_Add", "Add"),
+            Dock = DockStyle.Fill,
+            BackColor = _accentColor,
+            ForeColor = Color.White,
+            FlatStyle = FlatStyle.Flat,
+            Margin = new Padding(6, 3, 0, 3)
+        };
+        addReplacement.FlatAppearance.BorderSize = 0;
+        autocorrectAddPanel.Controls.Add(sourceLabel, 0, 0);
+        autocorrectAddPanel.Controls.Add(replacementLabel, 1, 0);
+        autocorrectAddPanel.Controls.Add(sourceText, 0, 1);
+        autocorrectAddPanel.Controls.Add(replacementText, 1, 1);
+        autocorrectAddPanel.Controls.Add(addReplacement, 2, 1);
+
+        _lstUserAutocorrect = new ListView
+        {
+            Dock = DockStyle.Fill,
+            View = View.Details,
+            FullRowSelect = true,
+            MultiSelect = false,
+            HideSelection = false,
+            BackColor = _sidebarColor,
+            ForeColor = _textColor,
+            BorderStyle = BorderStyle.None
+        };
+        _lstUserAutocorrect.Columns.Add(_locService.GetString("Settings_ReplaceFrom", "Typed text"), 180);
+        _lstUserAutocorrect.Columns.Add(_locService.GetString("Settings_ReplaceWith", "Replacement"), 220);
+        _lstUserAutocorrect.SizeChanged += (_, _) =>
+        {
+            var availableWidth = Math.Max(120, _lstUserAutocorrect.ClientSize.Width - 24);
+            _lstUserAutocorrect.Columns[0].Width = (int)(availableWidth * 0.42);
+            _lstUserAutocorrect.Columns[1].Width = availableWidth - _lstUserAutocorrect.Columns[0].Width;
+        };
+
+        void RefreshAutocorrectList()
+        {
+            _lstUserAutocorrect.BeginUpdate();
+            _lstUserAutocorrect.Items.Clear();
+            foreach (var pair in _currentSettings.UserAutocorrect.OrderBy(pair => pair.Key, StringComparer.CurrentCultureIgnoreCase))
+            {
+                var item = new ListViewItem(pair.Key) { Tag = pair.Key };
+                item.SubItems.Add(pair.Value);
+                _lstUserAutocorrect.Items.Add(item);
+            }
+            _lstUserAutocorrect.EndUpdate();
+        }
+
+        addReplacement.Click += (_, _) =>
+        {
+            var source = sourceText.Text.Trim().ToLowerInvariant();
+            var replacement = replacementText.Text.Trim();
+            if (source.Length == 0 || replacement.Length == 0)
+                return;
+
+            _currentSettings.UserAutocorrect[source] = replacement;
+            sourceText.Clear();
+            replacementText.Clear();
+            RefreshAutocorrectList();
+            SaveSettings();
+        };
+
+        var removeReplacement = new Button
+        {
+            Text = _locService.GetString("Settings_RemoveSelected", "Remove selected"),
+            Dock = DockStyle.Bottom,
+            Height = 32,
+            BackColor = Color.FromArgb(200, 50, 50),
+            ForeColor = Color.White,
+            FlatStyle = FlatStyle.Flat
+        };
+        removeReplacement.FlatAppearance.BorderSize = 0;
+        removeReplacement.Click += (_, _) =>
+        {
+            if (_lstUserAutocorrect.SelectedItems.Count == 0 ||
+                _lstUserAutocorrect.SelectedItems[0].Tag is not string source)
+            {
+                return;
+            }
+
+            _currentSettings.UserAutocorrect.Remove(source);
+            RefreshAutocorrectList();
+            SaveSettings();
+        };
+
+        RefreshAutocorrectList();
+        autocorrectPanel.Controls.Add(_lstUserAutocorrect);
+        autocorrectPanel.Controls.Add(removeReplacement);
+        autocorrectPanel.Controls.Add(autocorrectAddPanel);
+        autocorrectGroup.Controls.Add(autocorrectPanel);
+
+        columns.Controls.Add(exceptionsGroup, 0, 0);
+        columns.Controls.Add(autocorrectGroup, 1, 0);
+        pnl.Controls.Add(columns);
         pnl.Controls.Add(lblTitle);
         _tabDict.Controls.Add(pnl);
     }
@@ -682,38 +1154,228 @@ public class SettingsForm : Form
         pnl.Controls.Add(lblTitle);
         y += 40;
 
-        var lblNote = new Label { Text = _locService.GetString("Settings_GoogleTranslateNote", "⚠️ Google Translate is used by default (requires internet)."), ForeColor = Color.Orange, Font = new Font("Segoe UI", 10, FontStyle.Italic), AutoSize = true, Location = new Point(0, y) };
+        var lblNote = new Label
+        {
+            Text = _locService.GetString("Settings_GoogleTranslateNote", "⚠️ Online mode uses the billed Google Cloud Translation API and sends selected text to Google."),
+            ForeColor = Color.Orange,
+            Font = new Font("Segoe UI", 10, FontStyle.Italic),
+            AutoSize = true,
+            MaximumSize = new Size(540, 0),
+            Location = new Point(0, y)
+        };
         pnl.Controls.Add(lblNote);
         y += 40;
+
+        var hasTranslationCredential = false;
+        try
+        {
+            hasTranslationCredential = _translationCredentials.HasApiKey;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError("Failed to inspect the translation API credential", exception);
+        }
+        Panel? onlineSetting = null;
+
+        var credentialPanel = new Panel { Width = 700, Height = 40, Location = new Point(0, y) };
+        var credentialLabel = new Label
+        {
+            Text = _locService.GetString("Settings_GoogleCloudApiKey", "Google Cloud API key"),
+            ForeColor = _textColor,
+            AutoSize = true,
+            Location = new Point(0, 9)
+        };
+        var credentialInput = new TextBox
+        {
+            Width = 260,
+            Location = new Point(180, 5),
+            UseSystemPasswordChar = true,
+            MaxLength = 256,
+            PlaceholderText = hasTranslationCredential
+                ? _locService.GetString("Settings_ApiKeyStored", "Stored securely in Windows")
+                : _locService.GetString("Settings_ApiKeyMissing", "Required for online translation")
+        };
+        var saveCredential = new Button
+        {
+            Text = _locService.GetString("Settings_SaveApiKey", "Save key"),
+            Width = 95,
+            Height = 30,
+            Location = new Point(450, 4),
+            FlatStyle = FlatStyle.Flat,
+            ForeColor = _textColor,
+            BackColor = _sidebarColor
+        };
+        var removeCredential = new Button
+        {
+            Text = _locService.GetString("Settings_RemoveApiKey", "Remove"),
+            Width = 95,
+            Height = 30,
+            Location = new Point(555, 4),
+            FlatStyle = FlatStyle.Flat,
+            ForeColor = _textColor,
+            BackColor = _sidebarColor,
+            Enabled = hasTranslationCredential
+        };
+        saveCredential.Click += (_, _) =>
+        {
+            if (string.IsNullOrWhiteSpace(credentialInput.Text)) return;
+            try
+            {
+                _translationCredentials.SaveApiKey(credentialInput.Text);
+                credentialInput.Clear();
+                credentialInput.PlaceholderText = _locService.GetString(
+                    "Settings_ApiKeyStored",
+                    "Stored securely in Windows");
+                removeCredential.Enabled = true;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError("Failed to save the translation API credential", exception);
+                MessageBox.Show(
+                    this,
+                    _locService.GetString("Settings_ApiKeySaveError", "The API key could not be saved securely."),
+                    "LayoutFix",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        };
+        removeCredential.Click += (_, _) =>
+        {
+            try
+            {
+                _translationCredentials.SaveApiKey(null);
+                credentialInput.Clear();
+                credentialInput.PlaceholderText = _locService.GetString(
+                    "Settings_ApiKeyMissing",
+                    "Required for online translation");
+                removeCredential.Enabled = false;
+                _currentSettings.OnlineTranslationEnabled = false;
+                var onlineSwitch = onlineSetting?.Controls.OfType<ToggleSwitch>().FirstOrDefault();
+                if (onlineSwitch != null) onlineSwitch.Checked = false;
+                SaveSettings();
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError("Failed to remove the translation API credential", exception);
+                MessageBox.Show(
+                    this,
+                    _locService.GetString("Settings_ApiKeyRemoveError", "The API key could not be removed."),
+                    "LayoutFix",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        };
+        credentialPanel.Controls.AddRange([
+            credentialLabel,
+            credentialInput,
+            saveCredential,
+            removeCredential
+        ]);
+        pnl.Controls.Add(credentialPanel);
+        y += 45;
+
+        onlineSetting = CreateToggleSetting(
+            _locService.GetString("Settings_EnableOnlineTranslation", "Allow online translation through Google Cloud"),
+            _currentSettings.OnlineTranslationEnabled,
+            v => { _currentSettings.OnlineTranslationEnabled = v; SaveSettings(); },
+            y);
+        pnl.Controls.Add(onlineSetting);
+        y += 50;
 
         var tsOffline = CreateToggleSetting(_locService.GetString("Settings_UseOfflineModel", "Use local offline model (No internet)"), _currentSettings.UseOfflineTranslation, v => { _currentSettings.UseOfflineTranslation = v; SaveSettings(); }, y);
         pnl.Controls.Add(tsOffline);
         y += 50;
 
+        var tsHistory = CreateToggleSetting(
+            "Save translation history locally (contains your text)",
+            _currentSettings.TranslationHistoryEnabled,
+            v => { _currentSettings.TranslationHistoryEnabled = v; SaveSettings(); },
+            y);
+        pnl.Controls.Add(tsHistory);
+        y += 50;
+
+        var clearHistory = new Button
+        {
+            Text = _locService.GetString("Settings_ClearTranslationHistory", "Clear saved translation history"),
+            Width = 280,
+            Height = 30,
+            Location = new Point(0, y),
+            FlatStyle = FlatStyle.Flat,
+            ForeColor = _textColor,
+            BackColor = _sidebarColor
+        };
+        clearHistory.Click += async (_, _) =>
+        {
+            var confirmation = MessageBox.Show(
+                this,
+                _locService.GetString("Settings_ClearHistoryConfirmation", "Delete all locally saved translations?"),
+                _locService.GetString("Settings_ClearTranslationHistory", "Clear saved translation history"),
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+            if (confirmation != DialogResult.Yes)
+                return;
+
+            try
+            {
+                await _translationHistoryService.ClearHistoryAsync();
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError("Failed to clear translation history", exception);
+                MessageBox.Show(
+                    this,
+                    _locService.GetString("Settings_ClearHistoryError", "Translation history could not be deleted."),
+                    "LayoutFix",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        };
+        pnl.Controls.Add(clearHistory);
+        y += 42;
+
         var lblModel = new Label { Text = _locService.GetString("Settings_ModelSelection", "Model selection:"), AutoSize = true, Location = new Point(0, y + 4), ForeColor = _textColor };
         var cmbModel = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 350, Location = new Point(120, y), BackColor = _sidebarColor, ForeColor = _textColor };
-        cmbModel.Items.Add(new { Id = "light", Name = _locService.GetString("Settings_ModelLight", "Light Qwen 0.5B (350 MB, CPU)") });
-        cmbModel.Items.Add(new { Id = "alma", Name = _locService.GetString("Settings_ModelAlma", "Specialized ALMA 7B (4 GB, GPU)") });
-        cmbModel.Items.Add(new { Id = "pro", Name = _locService.GetString("Settings_ModelGemma", "General Gemma 2B (1.6 GB, GPU)") });
+        cmbModel.Items.Add(new { Id = "light", Name = _locService.GetString("Settings_ModelLight", "Light Qwen 0.5B (398 MB, 4 languages)") });
+        cmbModel.Items.Add(new { Id = "alma", Name = _locService.GetString("Settings_ModelAlma", "Specialized ALMA 7B (4.08 GB, 6 languages)") });
+        cmbModel.Items.Add(new { Id = "pro", Name = _locService.GetString("Settings_ModelQwenPro", "Balanced Qwen2.5 1.5B (1.12 GB, 5 languages)") });
         cmbModel.ValueMember = "Id";
         cmbModel.DisplayMember = "Name";
         
         cmbModel.SelectedIndex = _currentSettings.OfflineModelType == "pro" ? 2 : (_currentSettings.OfflineModelType == "alma" ? 1 : 0);
         pnl.Controls.Add(lblModel);
         pnl.Controls.Add(cmbModel);
+        var lblModelCapabilities = new Label
+        {
+            AutoSize = true,
+            Location = new Point(220, y + 44),
+            ForeColor = _textColor
+        };
+        pnl.Controls.Add(lblModelCapabilities);
         y += 40;
 
-        var downloadService = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<LayoutFix.Core.Services.ModelDownloadService>(AppHost.Services!);
+        var downloadService = _modelDownloadService;
         
         var btnDownload = new Button { Width = 200, Height = 30, Location = new Point(0, y), FlatStyle = FlatStyle.Flat, ForeColor = _textColor, BackColor = _sidebarColor };
         var progressDownload = new ProgressBar { Width = 280, Height = 10, Location = new Point(220, y + 10), Visible = false };
+        var btnCancelDownload = new Button
+        {
+            Text = _locService.GetString("Common_Cancel", "Cancel"),
+            Width = 110,
+            Height = 30,
+            Location = new Point(510, y),
+            FlatStyle = FlatStyle.Flat,
+            ForeColor = _textColor,
+            BackColor = _sidebarColor,
+            Visible = false
+        };
+        CancellationTokenSource? activeDownloadCancellation = null;
         
         Action updateDownloadButton = () => {
             string modelType = (cmbModel.SelectedItem as dynamic)?.Id ?? "light";
-            string fileName = modelType == "pro" ? "gemma-2b-it-q4_k_m.gguf" : (modelType == "alma" ? "alma-7b.Q4_K_M.gguf" : "qwen2-0_5b-instruct-q4_k_m.gguf");
-            string path = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LayoutFix", "Models", fileName);
+            var descriptor = OfflineModelCatalog.Get(modelType);
+            string path = OfflineModelLocator.GetModelPath(modelType);
             
-            if (downloadService.IsModelDownloaded(path)) {
+            if (downloadService.IsModelDownloaded(path, descriptor)) {
                 btnDownload.Text = _locService.GetString("Settings_ModelDownloaded", "Model Downloaded");
                 btnDownload.Enabled = false;
             } else {
@@ -722,46 +1384,106 @@ public class SettingsForm : Form
             }
         };
 
+        Action updateModelCapabilities = () =>
+        {
+            string modelType = (cmbModel.SelectedItem as dynamic)?.Id ?? "light";
+            lblModelCapabilities.Text = modelType switch
+            {
+                "alma" => _locService.GetString(
+                    "Settings_ModelAlmaCapabilities",
+                    "Validated offline targets: EN, RU, UK, DE, FR, ES."),
+                "pro" => _locService.GetString(
+                    "Settings_ModelQwenProCapabilities",
+                    "Validated offline targets: EN, RU, UK, FR, ES."),
+                _ => _locService.GetString(
+                    "Settings_ModelLightCapabilities",
+                    "Validated offline targets: EN, RU, FR, ES.")
+            };
+        };
+
         cmbModel.SelectedIndexChanged += (s, e) => {
             _currentSettings.OfflineModelType = (cmbModel.SelectedItem as dynamic)?.Id ?? "light";
             SaveSettings();
             updateDownloadButton();
+            updateModelCapabilities();
         };
         
         updateDownloadButton();
+        updateModelCapabilities();
+
+        btnCancelDownload.Click += (_, _) =>
+        {
+            btnCancelDownload.Enabled = false;
+            activeDownloadCancellation?.Cancel();
+        };
         
         btnDownload.Click += async (s, e) =>
         {
+            if (activeDownloadCancellation != null)
+                return;
+
+            using var downloadCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                _lifetimeCancellation.Token);
+            activeDownloadCancellation = downloadCancellation;
             btnDownload.Enabled = false;
+            cmbModel.Enabled = false;
+            lblModelCapabilities.Visible = false;
             progressDownload.Visible = true;
+            progressDownload.Value = 0;
+            btnCancelDownload.Enabled = true;
+            btnCancelDownload.Visible = true;
             btnDownload.Text = _locService.GetString("Settings_Downloading", "Downloading...");
             try
             {
                 string modelType = _currentSettings.OfflineModelType;
-                string url = modelType == "pro" 
-                    ? "https://huggingface.co/lmstudio-ai/gemma-2b-it-GGUF/resolve/main/gemma-2b-it-q4_k_m.gguf"
-                    : (modelType == "alma" ? "https://huggingface.co/TheBloke/ALMA-7B-GGUF/resolve/main/alma-7b.Q4_K_M.gguf" : "https://huggingface.co/Qwen/Qwen2-0.5B-Instruct-GGUF/resolve/main/qwen2-0_5b-instruct-q4_k_m.gguf");
-                    
-                string fileName = modelType == "pro" ? "gemma-2b-it-q4_k_m.gguf" : (modelType == "alma" ? "alma-7b.Q4_K_M.gguf" : "qwen2-0_5b-instruct-q4_k_m.gguf");
-                string path = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LayoutFix", "Models", fileName);
+                var descriptor = OfflineModelCatalog.Get(modelType);
+                string path = OfflineModelLocator.GetModelPath(modelType);
 
-                await downloadService.DownloadModelAsync(url, path, p => {
-                    if (progressDownload.InvokeRequired) progressDownload.Invoke(new Action(() => progressDownload.Value = (int)(p * 100)));
-                    else progressDownload.Value = (int)(p * 100);
-                });
-                updateDownloadButton();
-                progressDownload.Visible = false;
+                await downloadService.DownloadModelAsync(descriptor, path, p =>
+                {
+                    if (downloadCancellation.IsCancellationRequested || progressDownload.IsDisposed)
+                        return;
+
+                    void UpdateProgress() => progressDownload.Value = Math.Clamp((int)(p * 100), 0, 100);
+                    if (progressDownload.InvokeRequired)
+                        progressDownload.BeginInvoke(UpdateProgress);
+                    else
+                        UpdateProgress();
+                }, downloadCancellation.Token);
+            }
+            catch (OperationCanceledException) when (downloadCancellation.IsCancellationRequested)
+            {
+                if (!_lifetimeCancellation.IsCancellationRequested && !IsDisposed && !Disposing)
+                    btnDownload.Text = _locService.GetString("Settings_DownloadCancelled", "Download cancelled");
             }
             catch (Exception ex)
             {
+                if (IsDisposed || Disposing) return;
                 btnDownload.Text = _locService.GetString("Settings_DownloadError", "Download Error");
-                MessageBox.Show(_locService.GetString("Settings_DownloadError", "Download Error") + ": " + ex.Message);
-                btnDownload.Enabled = true;
+                MessageBox.Show(
+                    this,
+                    _locService.GetString("Settings_DownloadError", "Download Error") + ": " + ex.Message,
+                    "LayoutFix",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+            finally
+            {
+                activeDownloadCancellation = null;
+                if (!_lifetimeCancellation.IsCancellationRequested && !IsDisposed && !Disposing)
+                {
+                    cmbModel.Enabled = true;
+                    lblModelCapabilities.Visible = true;
+                    progressDownload.Visible = false;
+                    btnCancelDownload.Visible = false;
+                    updateDownloadButton();
+                }
             }
         };
 
         pnl.Controls.Add(btnDownload);
         pnl.Controls.Add(progressDownload);
+        pnl.Controls.Add(btnCancelDownload);
         y += 50;
 
         var locales = new LangItem[] {
@@ -786,10 +1508,17 @@ public class SettingsForm : Form
     {
         var pnl = new Panel { Width = 500, Height = 40, Location = new Point(0, y) };
         var lbl = new Label { Text = label, ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
-        var cmb = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(350, 8), BackColor = _sidebarColor, ForeColor = _textColor, DataSource = locales, DisplayMember = "Name", ValueMember = "Code" };
-        
-        cmb.SelectedValue = currentVal;
-        cmb.SelectedIndexChanged += (s, e) => { if (cmb.SelectedValue != null) onChange(cmb.SelectedValue.ToString()!); };
+        var cmb = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(350, 8), BackColor = _sidebarColor, ForeColor = _textColor, DisplayMember = "Name", ValueMember = "Code" };
+
+        cmb.Items.AddRange(locales.Cast<object>().ToArray());
+        var selectedIndex = Array.FindIndex(locales, locale =>
+            string.Equals(locale.Code, currentVal, StringComparison.OrdinalIgnoreCase));
+        cmb.SelectedIndex = selectedIndex >= 0 ? selectedIndex : 0;
+        cmb.SelectedIndexChanged += (s, e) =>
+        {
+            if (cmb.SelectedItem is LangItem item)
+                onChange(item.Code);
+        };
         
         pnl.Controls.Add(lbl);
         pnl.Controls.Add(cmb);
@@ -819,10 +1548,91 @@ public class SettingsForm : Form
         }
 
         string version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.9";
-        var lblDesc = new Label { Text = $"LayoutFix v{version}\nBuilt with .NET 8.\nAutomatic Layout Converter.", ForeColor = Color.Gray, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(120, 50) };
-        
+        var lblDesc = new Label
+        {
+            Text = $"LayoutFix v{version}\n" +
+                _locService.GetString("Settings_BuiltWith", "Built with .NET 8.") + "\n" +
+                _locService.GetString("Settings_AboutTagline", "Automatic keyboard layout correction and translation."),
+            ForeColor = Color.Gray,
+            Font = new Font("Segoe UI", 12),
+            AutoSize = true,
+            Location = new Point(120, 50)
+        };
+
+        var lblDiagnostics = new Label
+        {
+            Text = _locService.GetString("Settings_DiagnosticsReport", "Safe diagnostic report"),
+            ForeColor = _textColor,
+            Font = new Font("Segoe UI", 11, FontStyle.Bold),
+            AutoSize = true,
+            Location = new Point(0, 170)
+        };
+        var lblDiagnosticsPrivacy = new Label
+        {
+            Text = _locService.GetString(
+                "Settings_DiagnosticsPrivacy",
+                "Contains technical configuration counts only—no typed text, clipboard data, paths, API keys, or log contents."),
+            ForeColor = Color.Gray,
+            Font = new Font("Segoe UI", 9),
+            Location = new Point(0, 198),
+            Width = 740,
+            Height = 34
+        };
+        var txtDiagnostics = new TextBox
+        {
+            Text = DiagnosticsReportBuilder.Build(_currentSettings, version),
+            Multiline = true,
+            ReadOnly = true,
+            ScrollBars = ScrollBars.Vertical,
+            BackColor = _sidebarColor,
+            ForeColor = _textColor,
+            BorderStyle = BorderStyle.FixedSingle,
+            Font = new Font("Consolas", 9),
+            Location = new Point(0, 238),
+            Width = 740,
+            Height = 238,
+            AccessibleName = "DiagnosticsReport.Preview"
+        };
+        var btnCopyDiagnostics = new Button
+        {
+            Text = _locService.GetString("Settings_CopyDiagnostics", "Copy report"),
+            Location = new Point(0, 486),
+            Width = 160,
+            Height = 30,
+            BackColor = _accentColor,
+            ForeColor = Color.White,
+            FlatStyle = FlatStyle.Flat,
+            AccessibleName = "DiagnosticsReport.Copy"
+        };
+        btnCopyDiagnostics.FlatAppearance.BorderSize = 0;
+        var lblCopyStatus = new Label
+        {
+            ForeColor = Color.Gray,
+            Font = new Font("Segoe UI", 9),
+            AutoSize = true,
+            Location = new Point(170, 493),
+            AccessibleName = "DiagnosticsReport.Status"
+        };
+        btnCopyDiagnostics.Click += (_, _) =>
+        {
+            try
+            {
+                Clipboard.SetText(txtDiagnostics.Text);
+                lblCopyStatus.Text = _locService.GetString("Settings_DiagnosticsCopied", "Copied to clipboard.");
+            }
+            catch
+            {
+                lblCopyStatus.Text = _locService.GetString("Settings_DiagnosticsCopyError", "Clipboard is temporarily unavailable.");
+            }
+        };
+
         _tabAbout.Controls.Add(picLogo);
         _tabAbout.Controls.Add(lblDesc);
+        _tabAbout.Controls.Add(lblDiagnostics);
+        _tabAbout.Controls.Add(lblDiagnosticsPrivacy);
+        _tabAbout.Controls.Add(txtDiagnostics);
+        _tabAbout.Controls.Add(btnCopyDiagnostics);
+        _tabAbout.Controls.Add(lblCopyStatus);
         _tabAbout.Controls.Add(lblTitle);
     }
 

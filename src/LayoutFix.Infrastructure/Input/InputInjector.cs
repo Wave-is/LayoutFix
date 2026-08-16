@@ -1,9 +1,9 @@
 using System;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
-using System.Threading;
 using System.Threading.Tasks;
-using System.Windows.Forms;
 using LayoutFix.Core.Interfaces;
+using LayoutFix.Core.Models;
 using LayoutFix.Infrastructure.Hooks;
 using LayoutFix.Infrastructure.Native;
 
@@ -11,11 +11,19 @@ namespace LayoutFix.Infrastructure.Input;
 
 public class InputInjector : IInputInjector
 {
-    private readonly ILoggerService _logger;
+    private readonly Func<Win32.INPUT[], uint> _inputSender;
 
-    public InputInjector(ILoggerService logger)
+    public InputInjector()
+        : this(inputs => Win32.SendInput(
+            (uint)inputs.Length,
+            inputs,
+            Marshal.SizeOf<Win32.INPUT>()))
     {
-        _logger = logger;
+    }
+
+    internal InputInjector(Func<Win32.INPUT[], uint> inputSender)
+    {
+        _inputSender = inputSender ?? throw new ArgumentNullException(nameof(inputSender));
     }
 
     public async Task SendKeyCombinationAsync(bool ctrl, bool alt, bool shift, string key)
@@ -36,6 +44,7 @@ public class InputInjector : IInputInjector
         if (alt) inputs[idx++] = CreateKeyboardInput((ushort)Win32.VK_MENU, false);
         if (shift) inputs[idx++] = CreateKeyboardInput((ushort)Win32.VK_SHIFT, false);
 
+        var targetKeyDownIndex = idx;
         inputs[idx++] = CreateKeyboardInput(vk, false);
         inputs[idx++] = CreateKeyboardInput(vk, true);
 
@@ -43,11 +52,11 @@ public class InputInjector : IInputInjector
         if (alt) inputs[idx++] = CreateKeyboardInput((ushort)Win32.VK_MENU, true);
         if (ctrl) inputs[idx++] = CreateKeyboardInput((ushort)Win32.VK_CONTROL, true);
 
-        uint res = Win32.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Win32.INPUT)));
-        if (res == 0)
-        {
-            _logger.LogError($"SendInput failed. Error: {Marshal.GetLastWin32Error()}", null!);
-        }
+        SendInputs(
+            inputs,
+            InputInjectionOperation.KeyCombination,
+            requestedUnitCount: 1,
+            affectedUnitCount: sent => sent > targetKeyDownIndex ? 1 : 0);
         await Task.Delay(50);
     }
 
@@ -60,21 +69,12 @@ public class InputInjector : IInputInjector
             inputs[i * 2] = CreateKeyboardInput(0x08, false);
             inputs[i * 2 + 1] = CreateKeyboardInput(0x08, true);
         }
-        Win32.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Win32.INPUT)));
+        SendInputs(
+            inputs,
+            InputInjectionOperation.Backspace,
+            requestedUnitCount: count,
+            affectedUnitCount: sent => Math.Min(count, (sent + 1) / 2));
         await Task.Delay(20);
-    }
-
-    public async Task ReleaseModifiersAsync()
-    {
-        var inputs = new Win32.INPUT[5];
-        inputs[0] = CreateKeyboardInput((ushort)Win32.VK_SHIFT, true);
-        inputs[1] = CreateKeyboardInput((ushort)Win32.VK_MENU, true);
-        inputs[2] = CreateKeyboardInput((ushort)Win32.VK_CONTROL, true);
-        inputs[3] = CreateKeyboardInput((ushort)Win32.VK_LWIN, true);
-        inputs[4] = CreateKeyboardInput((ushort)Win32.VK_RWIN, true);
-        
-        Win32.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Win32.INPUT)));
-        await Task.Delay(50);
     }
 
     public async Task WaitForModifiersReleaseAsync(int timeoutMs = 2000)
@@ -95,7 +95,9 @@ public class InputInjector : IInputInjector
             await Task.Delay(20);
             elapsed += 20;
         }
-        await ReleaseModifiersAsync();
+
+        if (elapsed >= timeoutMs)
+            throw new TimeoutException("Modifier keys were not released before the input operation timed out.");
     }
 
     public async Task SendTextAsync(string text)
@@ -128,91 +130,17 @@ public class InputInjector : IInputInjector
             inputs[idx++] = up;
         }
 
-        Win32.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Win32.INPUT)));
+        SendInputs(
+            inputs,
+            InputInjectionOperation.Text,
+            requestedUnitCount: text.Length,
+            affectedUnitCount: sent => Math.Min(text.Length, (sent + 1) / 2));
         await Task.Delay(50);
     }
 
     public async Task SelectWordLeftAsync()
     {
         await SendKeyCombinationAsync(true, false, true, "left");
-    }
-
-    public async Task<string?> GetClipboardTextAsync()
-    {
-        string? result = null;
-        var t = new Thread(() =>
-        {
-            int retries = 5;
-            while (retries > 0)
-            {
-                try
-                {
-                    if (Clipboard.ContainsText())
-                    {
-                        result = Clipboard.GetText();
-                    }
-                    break;
-                }
-                catch (ExternalException ex)
-                {
-                    _logger.LogWarning($"GetClipboardTextAsync failed (retries left: {retries - 1}). Exception: {ex.Message}");
-                    retries--;
-                    Thread.Sleep(50);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError("Unexpected error in GetClipboardTextAsync", ex);
-                    break;
-                }
-            }
-        });
-        t.SetApartmentState(ApartmentState.STA);
-        t.Start();
-        t.Join();
-        return await Task.FromResult(result);
-    }
-
-    public async Task SetClipboardTextAsync(string text)
-    {
-        var t = new Thread(() =>
-        {
-            int retries = 5;
-            while (retries > 0)
-            {
-                try
-                {
-                    if (string.IsNullOrEmpty(text))
-                    {
-                        Clipboard.Clear();
-                    }
-                    else
-                    {
-                        Clipboard.SetText(text);
-                    }
-                    break;
-                }
-                catch (ExternalException ex)
-                {
-                    _logger.LogWarning($"SetClipboardTextAsync failed (retries left: {retries - 1}). Exception: {ex.Message}");
-                    retries--;
-                    Thread.Sleep(50);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError("Unexpected error in SetClipboardTextAsync", ex);
-                    break;
-                }
-            }
-        });
-        t.SetApartmentState(ApartmentState.STA);
-        t.Start();
-        t.Join();
-        await Task.CompletedTask;
-    }
-
-    public uint GetClipboardSequenceNumber()
-    {
-        return Win32.GetClipboardSequenceNumber();
     }
 
     private Win32.INPUT CreateKeyboardInput(ushort vk, bool isKeyUp)
@@ -228,7 +156,79 @@ public class InputInjector : IInputInjector
         return input;
     }
 
-    private ushort MapStringToVirtualKey(string key)
+    private void SendInputs(
+        Win32.INPUT[] inputs,
+        InputInjectionOperation operation,
+        int requestedUnitCount,
+        Func<int, int> affectedUnitCount)
+    {
+        var sent = (int)_inputSender(inputs);
+        if (sent != inputs.Length)
+        {
+            var error = Marshal.GetLastWin32Error();
+            ReleaseAcceptedKeyDowns(inputs, sent);
+            throw new InputInjectionException(
+                operation,
+                requestedUnitCount,
+                affectedUnitCount(sent),
+                inputs.Length,
+                sent,
+                new Win32Exception(
+                    error,
+                    "SendInput was blocked or only partially accepted. The target may be elevated or unavailable."));
+        }
+    }
+
+    private void ReleaseAcceptedKeyDowns(Win32.INPUT[] inputs, int acceptedEventCount)
+    {
+        if (acceptedEventCount <= 0)
+            return;
+
+        var pressed = new List<Win32.KEYBDINPUT>();
+        foreach (var input in inputs.Take(Math.Min(acceptedEventCount, inputs.Length)))
+        {
+            if (input.type != Win32.INPUT_KEYBOARD)
+                continue;
+
+            var key = input.u.ki;
+            if ((key.dwFlags & Win32.KEYEVENTF_KEYUP) == 0)
+            {
+                pressed.Add(key);
+                continue;
+            }
+
+            var matchingIndex = pressed.FindLastIndex(candidate =>
+                candidate.wVk == key.wVk && candidate.wScan == key.wScan);
+            if (matchingIndex >= 0)
+                pressed.RemoveAt(matchingIndex);
+        }
+
+        if (pressed.Count == 0)
+            return;
+
+        var releases = pressed
+            .AsEnumerable()
+            .Reverse()
+            .Select(key =>
+            {
+                var release = new Win32.INPUT { type = Win32.INPUT_KEYBOARD };
+                release.u.ki = key;
+                release.u.ki.dwFlags |= Win32.KEYEVENTF_KEYUP;
+                return release;
+            })
+            .ToArray();
+
+        try
+        {
+            _inputSender(releases);
+        }
+        catch
+        {
+            // Preserve the original progress-aware failure. Cleanup is best effort.
+        }
+    }
+
+    internal static ushort MapStringToVirtualKey(string key)
     {
         if (key.Length == 1)
         {
@@ -239,7 +239,15 @@ public class InputInjector : IInputInjector
             short vk = Win32.VkKeyScan(key[0]);
             return (ushort)(vk & 0xFF);
         }
-        return key.ToLowerInvariant() switch
+        var normalized = key.ToLowerInvariant();
+        if (normalized.Length is 2 or 3 && normalized[0] == 'f' &&
+            int.TryParse(normalized.AsSpan(1), out var functionNumber) &&
+            functionNumber is >= 1 and <= 24)
+        {
+            return (ushort)(0x70 + functionNumber - 1);
+        }
+
+        return normalized switch
         {
             "left" => 0x25,
             "up" => 0x26,
@@ -251,6 +259,13 @@ public class InputInjector : IInputInjector
             "space" => 0x20,
             "enter" => 0x0D,
             "backspace" => 0x08,
+            "tab" => 0x09,
+            "escape" or "esc" => 0x1B,
+            "delete" or "del" => 0x2E,
+            "home" => 0x24,
+            "end" => 0x23,
+            "pageup" => 0x21,
+            "pagedown" => 0x22,
             _ => 0
         };
     }

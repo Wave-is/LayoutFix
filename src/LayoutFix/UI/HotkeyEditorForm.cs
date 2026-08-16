@@ -17,6 +17,7 @@ public class HotkeyEditorForm : Form
 
     public string ResultHotkey { get; private set; }
     private readonly string _actionDescription;
+    private bool _winPressed;
 
     public HotkeyEditorForm(string initialHotkey, string actionDescription)
     {
@@ -111,6 +112,11 @@ public class HotkeyEditorForm : Form
         this.Controls.Add(_btnCancel);
 
         this.KeyDown += HotkeyEditorForm_KeyDown;
+        this.KeyUp += (_, e) =>
+        {
+            if (e.KeyCode is Keys.LWin or Keys.RWin)
+                _winPressed = false;
+        };
     }
 
     private void HotkeyEditorForm_KeyDown(object? sender, KeyEventArgs e)
@@ -132,8 +138,14 @@ public class HotkeyEditorForm : Form
             return;
         }
 
+        if (e.KeyCode is Keys.LWin or Keys.RWin)
+        {
+            _winPressed = true;
+            return;
+        }
+
         // Ignore modifier-only presses
-        if (e.KeyCode == Keys.ControlKey || e.KeyCode == Keys.ShiftKey || e.KeyCode == Keys.Menu || e.KeyCode == Keys.LWin || e.KeyCode == Keys.RWin)
+        if (e.KeyCode == Keys.ControlKey || e.KeyCode == Keys.ShiftKey || e.KeyCode == Keys.Menu)
         {
             return;
         }
@@ -142,15 +154,11 @@ public class HotkeyEditorForm : Form
         if (e.Control) newCombo += "Ctrl+";
         if (e.Shift) newCombo += "Shift+";
         if (e.Alt) newCombo += "Alt+";
+        if (_winPressed) newCombo += "Win+";
 
-        string keyName = e.KeyCode.ToString();
-        
-        // Normalize some keys to match our parser
-        if (e.KeyCode == Keys.Scroll) keyName = "Scroll";
-        else if (e.KeyCode == Keys.Oemtilde) keyName = "`";
-        else if (e.KeyCode >= Keys.D0 && e.KeyCode <= Keys.D9) keyName = keyName.Substring(1);
-        else if (e.KeyCode == Keys.Oemplus) keyName = "=";
-        else if (e.KeyCode == Keys.OemMinus) keyName = "-";
+        var keyName = HotkeyCombo.GetCanonicalKeyName((int)e.KeyCode);
+        if (keyName.Length == 0)
+            return;
 
         newCombo += keyName;
 

@@ -1,46 +1,103 @@
-using System;
 using System.Net.Http;
-using System.Text.Json.Nodes;
-using System.Threading.Tasks;
-using System.Web;
+using System.Net.Http.Json;
+using System.Text.Json;
 using LayoutFix.Core.Interfaces;
 
 namespace LayoutFix.Core.Services;
 
-public class TranslationService : ITranslationService
+public sealed class TranslationService : ITranslationService, IDisposable
 {
-    private static readonly HttpClient _httpClient = new HttpClient();
+    private const int MaximumInputLength = 10_000;
+    private static readonly Uri Endpoint = new(
+        "https://translation.googleapis.com/language/translate/v2");
+    private readonly HttpClient _httpClient;
+    private readonly ITranslationCredentialStore _credentials;
+    private readonly bool _ownsHttpClient;
 
-    public async Task<string> TranslateAsync(string text, string targetLanguage)
+    public TranslationService(ITranslationCredentialStore credentials)
+        : this(CreateHttpClient(), credentials, ownsHttpClient: true)
     {
-        try
+    }
+
+    public TranslationService(HttpClient httpClient, ITranslationCredentialStore credentials)
+        : this(httpClient, credentials, ownsHttpClient: false)
+    {
+    }
+
+    private TranslationService(
+        HttpClient httpClient,
+        ITranslationCredentialStore credentials,
+        bool ownsHttpClient)
+    {
+        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _credentials = credentials ?? throw new ArgumentNullException(nameof(credentials));
+        _ownsHttpClient = ownsHttpClient;
+    }
+
+    public async Task<string> TranslateAsync(
+        string text,
+        string targetLanguage,
+        string sourceLanguage = "auto",
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+        if (text.Length > MaximumInputLength)
+            throw new ArgumentException($"Translation input exceeds {MaximumInputLength} characters.", nameof(text));
+        if (string.IsNullOrWhiteSpace(targetLanguage))
+            throw new ArgumentException("Target language is required.", nameof(targetLanguage));
+        var apiKey = _credentials.ReadApiKey();
+        if (string.IsNullOrWhiteSpace(apiKey))
+            throw new InvalidOperationException("A Google Cloud Translation API key is not configured.");
+
+        var body = new Dictionary<string, string>
         {
-            if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+            ["q"] = text,
+            ["target"] = targetLanguage,
+            ["format"] = "text"
+        };
+        if (!string.IsNullOrWhiteSpace(sourceLanguage) && sourceLanguage != "auto")
+            body["source"] = sourceLanguage;
 
-            string encodedText = HttpUtility.UrlEncode(text);
-            string url = $"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={targetLanguage}&dt=t&q={encodedText}";
-
-            string response = await _httpClient.GetStringAsync(url);
-            
-            var node = JsonNode.Parse(response);
-            if (node is JsonArray rootArray && rootArray.Count > 0 && rootArray[0] is JsonArray sentencesArray)
-            {
-                string result = "";
-                foreach (var sentenceNode in sentencesArray)
-                {
-                    if (sentenceNode is JsonArray sentence && sentence.Count > 0)
-                    {
-                        result += sentence[0]?.ToString() ?? "";
-                    }
-                }
-                return result.Trim();
-            }
-
-            return "Translation failed.";
-        }
-        catch (Exception ex)
+        using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint)
         {
-            return $"Error: {ex.Message}";
+            Content = JsonContent.Create(body)
+        };
+        // Google recommends the header over the query parameter so the secret is
+        // not exposed in URLs, proxy logs, or exception diagnostics.
+        request.Headers.Add("x-goog-api-key", apiKey);
+
+        using var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (!document.RootElement.TryGetProperty("data", out var data) ||
+            !data.TryGetProperty("translations", out var translations) ||
+            translations.ValueKind != JsonValueKind.Array ||
+            translations.GetArrayLength() == 0 ||
+            !translations[0].TryGetProperty("translatedText", out var translatedText) ||
+            translatedText.ValueKind != JsonValueKind.String)
+        {
+            throw new InvalidDataException("Translation provider returned an unexpected response.");
         }
+
+        var translated = System.Net.WebUtility.HtmlDecode(translatedText.GetString() ?? string.Empty).Trim();
+        return translated.Length > 0
+            ? translated
+            : throw new InvalidDataException("Translation provider returned an empty translation.");
+    }
+
+    private static HttpClient CreateHttpClient() => new()
+    {
+        Timeout = TimeSpan.FromSeconds(12)
+    };
+
+    public void Dispose()
+    {
+        if (_ownsHttpClient)
+            _httpClient.Dispose();
     }
 }

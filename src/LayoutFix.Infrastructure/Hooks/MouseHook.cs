@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using LayoutFix.Core.Interfaces;
@@ -13,6 +14,9 @@ public class MouseHook : IMouseHook
     private IntPtr _hookId = IntPtr.Zero;
     private readonly Win32.LowLevelKeyboardProc _proc;
     private readonly ILoggerService _logger;
+    private long _inputGeneration;
+
+    public long InputGeneration => Interlocked.Read(ref _inputGeneration);
 
     public MouseHook(ILoggerService logger)
     {
@@ -25,6 +29,11 @@ public class MouseHook : IMouseHook
         if (_hookId == IntPtr.Zero)
         {
             _hookId = SetHook(_proc);
+            if (_hookId == IntPtr.Zero)
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Unable to install the global mouse hook.");
+            Interlocked.Increment(ref _inputGeneration);
         }
     }
 
@@ -32,7 +41,7 @@ public class MouseHook : IMouseHook
     {
         if (_hookId != IntPtr.Zero)
         {
-            Win32.UnhookWindowsHookEx(_hookId);
+            WindowsHookLifecycle.EnsureUnhooked(_hookId, "mouse");
             _hookId = IntPtr.Zero;
         }
     }
@@ -52,8 +61,9 @@ public class MouseHook : IMouseHook
             if (nCode >= 0)
             {
                 int msg = wParam.ToInt32();
-                if (msg == Win32.WM_LBUTTONDOWN || msg == Win32.WM_RBUTTONDOWN || msg == Win32.WM_MBUTTONDOWN)
+                if (IsButtonDownMessage(msg))
                 {
+                    Interlocked.Increment(ref _inputGeneration);
                     MouseClicked?.Invoke(this, EventArgs.Empty);
                 }
             }
@@ -64,6 +74,12 @@ public class MouseHook : IMouseHook
         }
         return Win32.CallNextHookEx(_hookId, nCode, wParam, lParam);
     }
+
+    internal static bool IsButtonDownMessage(int message) =>
+        message is Win32.WM_LBUTTONDOWN or
+            Win32.WM_RBUTTONDOWN or
+            Win32.WM_MBUTTONDOWN or
+            Win32.WM_XBUTTONDOWN;
 
     public void Dispose()
     {

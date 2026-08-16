@@ -8,15 +8,25 @@ namespace LayoutFix.UI.Controls;
 
 public class TranslationPopupForm : Form
 {
+    private const int WsExNoActivate = 0x08000000;
+    private const int WsExToolWindow = 0x00000080;
+    private const int WsExTopmost = 0x00000008;
     private readonly Label _lblText;
     private readonly System.Windows.Forms.Timer _timerFade;
+    private readonly System.Windows.Forms.Timer? _timerClose;
+    private readonly bool _copyOnClick;
     private double _opacity = 0;
 
-    public TranslationPopupForm(string text, Color bgColor, Color textColor)
+    public TranslationPopupForm(
+        string text,
+        Color bgColor,
+        Color textColor,
+        int autoCloseMilliseconds = 0,
+        bool copyOnClick = true)
     {
+        _copyOnClick = copyOnClick;
         this.FormBorderStyle = FormBorderStyle.None;
         this.ShowInTaskbar = false;
-        this.TopMost = true;
         this.BackColor = bgColor;
         this.Opacity = 0;
 
@@ -50,6 +60,12 @@ public class TranslationPopupForm : Form
             }
         };
 
+        if (autoCloseMilliseconds > 0)
+        {
+            _timerClose = new System.Windows.Forms.Timer { Interval = autoCloseMilliseconds };
+            _timerClose.Tick += (_, _) => Close();
+        }
+
         SetLocationNearCursor();
     }
 
@@ -70,10 +86,34 @@ public class TranslationPopupForm : Form
         this.Location = new Point(x, y);
     }
 
+    protected override bool ShowWithoutActivation => true;
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var parameters = base.CreateParams;
+            parameters.ExStyle |= WsExNoActivate | WsExToolWindow | WsExTopmost;
+            return parameters;
+        }
+    }
+
     protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
         _timerFade.Start();
+        _timerClose?.Start();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _timerFade.Dispose();
+            _timerClose?.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -108,7 +148,8 @@ public class TranslationPopupForm : Form
     protected override void OnClick(EventArgs e)
     {
         base.OnClick(e);
-        Clipboard.SetText(_lblText.Text);
+        if (_copyOnClick)
+            Clipboard.SetText(_lblText.Text);
         this.Close();
     }
 }

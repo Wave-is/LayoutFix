@@ -10,10 +10,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" Version="6.0.0" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
-    <PackageReference Include="xunit" Version="2.5.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
 
   <ItemGroup>
@@ -23,6 +23,40 @@
   <ItemGroup>
     <ProjectReference Include="..\LayoutFix.Core\LayoutFix.Core.csproj" />
     <ProjectReference Include="..\LayoutFix.Infrastructure\LayoutFix.Infrastructure.csproj" />
+    <ProjectReference Include="..\LayoutFix\LayoutFix.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\LayoutFix\Dictionaries\en.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>ProductionDictionaries\en.txt</Link>
+    </None>
+    <None Include="..\LayoutFix\Dictionaries\ru.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>ProductionDictionaries\ru.txt</Link>
+    </None>
+    <None Include="..\LayoutFix\Dictionaries\uk.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>ProductionDictionaries\uk.txt</Link>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\locales\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>locales\%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\LayoutFix.Core\Resources\technical-tokens.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>TestData\technical-tokens.txt</Link>
+    </None>
+    <None Include="..\LayoutFix.Core\Resources\frequent-source-tokens.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>TestData\frequent-source-tokens.txt</Link>
+    </None>
   </ItemGroup>
 
 </Project>

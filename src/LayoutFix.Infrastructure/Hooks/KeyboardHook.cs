@@ -1,6 +1,8 @@
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using LayoutFix.Core.Interfaces;
 using LayoutFix.Core.Models;
 using LayoutFix.Infrastructure.Native;
@@ -14,8 +16,11 @@ public class KeyboardHook : IKeyboardHook
     private IntPtr _hookId = IntPtr.Zero;
     private readonly Win32.LowLevelKeyboardProc _proc;
     private readonly ILoggerService _logger;
+    private readonly KeyboardStateTracker _state = new();
+    private long _inputGeneration;
     
     public static readonly IntPtr InjectedExtraInfo = new IntPtr(0x1337);
+    public long InputGeneration => Interlocked.Read(ref _inputGeneration);
 
     public KeyboardHook(ILoggerService logger)
     {
@@ -27,7 +32,13 @@ public class KeyboardHook : IKeyboardHook
     {
         if (_hookId == IntPtr.Zero)
         {
+            _state.Reset();
+            _state.SeedModifiers(IsKeyPressed);
+            _state.SeedToggleKeys(IsKeyToggled);
             _hookId = SetHook(_proc);
+            if (_hookId == IntPtr.Zero)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to install the global keyboard hook.");
+            Interlocked.Increment(ref _inputGeneration);
         }
     }
 
@@ -35,8 +46,9 @@ public class KeyboardHook : IKeyboardHook
     {
         if (_hookId != IntPtr.Zero)
         {
-            Win32.UnhookWindowsHookEx(_hookId);
+            WindowsHookLifecycle.EnsureUnhooked(_hookId, "keyboard");
             _hookId = IntPtr.Zero;
+            _state.Reset();
         }
     }
 
@@ -52,7 +64,7 @@ public class KeyboardHook : IKeyboardHook
     {
         try
         {
-            if (nCode >= 0 && (wParam == (IntPtr)Win32.WM_KEYDOWN || wParam == (IntPtr)Win32.WM_SYSKEYDOWN))
+            if (nCode >= 0)
             {
                 var hookStruct = Marshal.PtrToStructure<Win32.KBDLLHOOKSTRUCT>(lParam);
 
@@ -61,40 +73,42 @@ public class KeyboardHook : IKeyboardHook
                     return Win32.CallNextHookEx(_hookId, nCode, wParam, lParam);
                 }
 
-                int vkCode = (int)hookStruct.vkCode;
+                var isKeyDown = wParam == (IntPtr)Win32.WM_KEYDOWN || wParam == (IntPtr)Win32.WM_SYSKEYDOWN;
+                var isKeyUp = wParam == (IntPtr)Win32.WM_KEYUP || wParam == (IntPtr)Win32.WM_SYSKEYUP;
+                if (!isKeyDown && !isKeyUp)
+                    return Win32.CallNextHookEx(_hookId, nCode, wParam, lParam);
 
-                if (vkCode == Win32.VK_SHIFT || vkCode == Win32.VK_CONTROL || vkCode == Win32.VK_MENU || 
-                    vkCode == Win32.VK_LWIN || vkCode == Win32.VK_RWIN || 
-                    vkCode == 0xA0 || vkCode == 0xA1 || vkCode == 0xA2 || 
-                    vkCode == 0xA3 || vkCode == 0xA4 || vkCode == 0xA5)
+                var vkCode = (int)hookStruct.vkCode;
+                if (isKeyUp)
                 {
+                    _state.ProcessKeyUp(vkCode);
+                    if (_state.ReleaseSuppression(vkCode))
+                        return new IntPtr(1);
+
                     return Win32.CallNextHookEx(_hookId, nCode, wParam, lParam);
                 }
 
-                bool isAlt = IsKeyPressed(Win32.VK_MENU) || IsKeyPressed(0xA4) || IsKeyPressed(0xA5);
-                bool isCtrl = IsKeyPressed(Win32.VK_CONTROL) || IsKeyPressed(0xA2) || IsKeyPressed(0xA3);
-                bool isShift = IsKeyPressed(Win32.VK_SHIFT) || IsKeyPressed(0xA0) || IsKeyPressed(0xA1);
-                bool isWin = IsKeyPressed(Win32.VK_LWIN) || IsKeyPressed(Win32.VK_RWIN);
-                bool isPrintScreen = IsKeyPressed(0x2C); // VK_SNAPSHOT
+                Interlocked.Increment(ref _inputGeneration);
 
-                string keyStr = MapVirtualKeyToString(vkCode);
+                _state.ReconcilePriorStateBeforeKeyDown(IsKeyPressed);
+                var transition = _state.ProcessKeyDown(vkCode, hookStruct.flags, hookStruct.time);
+                if (transition.Combo == null)
+                    return Win32.CallNextHookEx(_hookId, nCode, wParam, lParam);
 
-                var combo = new HotkeyCombo
-                {
-                    Alt = isAlt,
-                    Ctrl = isCtrl,
-                    Shift = isShift,
-                    Win = isWin,
-                    PrintScreen = isPrintScreen,
-                    Key = keyStr,
-                    VirtualKey = vkCode
-                };
+                if (transition.IsRepeat && _state.IsSuppressed(vkCode))
+                    return new IntPtr(1);
 
-                var args = new HotkeyEventArgs(combo);
+                var text = GetTypedText(hookStruct);
+                var args = new HotkeyEventArgs(
+                    transition.Combo,
+                    transition.IsRepeat,
+                    text.Text,
+                    text.IsDeadKey);
                 HotkeyPressed?.Invoke(this, args);
 
                 if (args.Handled)
                 {
+                    _state.SuppressUntilKeyUp(vkCode);
                     return new IntPtr(1);
                 }
             }
@@ -111,46 +125,33 @@ public class KeyboardHook : IKeyboardHook
         return (Win32.GetAsyncKeyState(vKey) & 0x8000) != 0;
     }
 
-    private string MapVirtualKeyToString(int vkCode)
+    private static bool IsKeyToggled(int virtualKey) =>
+        (Win32.GetKeyState(virtualKey) & 0x0001) != 0;
+
+    private KeyboardTextObservation GetTypedText(Win32.KBDLLHOOKSTRUCT keyboardEvent)
     {
-        if (vkCode >= 'A' && vkCode <= 'Z') return ((char)vkCode).ToString().ToLower();
-        if (vkCode >= '0' && vkCode <= '9') return ((char)vkCode).ToString();
-        if (vkCode >= 0x70 && vkCode <= 0x7B) return "f" + (vkCode - 0x70 + 1);
-        
-        return vkCode switch
-        {
-            0x20 => "space",
-            0x0D => "enter",
-            0x1B => "esc",
-            0x09 => "tab",
-            0x13 => "pause",
-            0x14 => "capslock",
-            0x91 => "scroll",
-            0x2D => "insert",
-            0x08 => "backspace",
-            0x2E => "delete",
-            0x24 => "home",
-            0x23 => "end",
-            0x21 => "pageup",
-            0x22 => "pagedown",
-            0x25 => "left",
-            0x26 => "up",
-            0x27 => "right",
-            0x28 => "down",
-            0x2C => "printscreen",
-            0xBC => ",",
-            0xBE => ".",
-            0xBF => "/",
-            0xBA => ";",
-            0xDE => "'",
-            0xDB => "[",
-            0xDD => "]",
-            0xDC => "\\",
-            0xC0 => "`",
-            0xBD => "-",
-            0xBB => "=",
-            _ => "unknown"
-        };
+        var foreground = Win32.GetForegroundWindow();
+        var threadId = foreground == IntPtr.Zero
+            ? 0
+            : Win32.GetWindowThreadProcessId(foreground, out _);
+        var keyboardLayout = Win32.GetKeyboardLayout(threadId);
+        var buffer = new StringBuilder(8);
+        var result = Win32.ToUnicodeEx(
+            keyboardEvent.vkCode,
+            keyboardEvent.scanCode,
+            _state.CreateKeyboardState(),
+            buffer,
+            buffer.Capacity,
+            Win32.TOUNICODE_NO_STATE_CHANGE,
+            keyboardLayout);
+
+        return KeyboardTextDecoder.Decode(result, buffer);
+    }
+
+    internal static string MapVirtualKeyToString(int vkCode)
+    {
+        var canonical = HotkeyCombo.GetCanonicalKeyName(vkCode);
+        return canonical.Length == 0 ? "unknown" : canonical;
     }
 
     public void Dispose()

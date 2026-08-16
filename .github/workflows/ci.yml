@@ -1,0 +1,249 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'codex/**'
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore solution
+        run: dotnet restore LayoutFix.sln
+
+      - name: Restore Windows E2E harness
+        run: dotnet restore tests\LayoutFix.WindowsE2E\LayoutFix.WindowsE2E.csproj -r win-x64 -p:Configuration=Release
+
+      - name: Build solution
+        run: dotnet build LayoutFix.sln -c Release --no-restore -p:TreatWarningsAsErrors=true
+
+      - name: Audit NuGet dependencies
+        run: dotnet list LayoutFix.sln package --vulnerable --include-transitive
+
+      - name: Test solution
+        run: dotnet test LayoutFix.sln -c Release --no-build
+
+      - name: Build Windows E2E harness
+        run: dotnet build tests\LayoutFix.WindowsE2E\LayoutFix.WindowsE2E.csproj -c Release --no-restore -p:TreatWarningsAsErrors=true /nodeReuse:false
+
+      - name: Verify canonical autostart registry command
+        shell: pwsh
+        run: tests\Run-AutoStartRegistryE2E.ps1
+
+      - name: Verify clean Settings close does not write
+        shell: pwsh
+        run: |
+          $e2e = "tests\LayoutFix.WindowsE2E\bin\Release\net8.0-windows\win-x64\LayoutFix.WindowsE2E.exe"
+          & $e2e --settings-clean-close-test
+          if ($LASTEXITCODE -ne 0) { throw "Settings clean-close E2E failed with $LASTEXITCODE." }
+
+      - name: Verify settings failure diagnostics
+        shell: pwsh
+        run: |
+          $e2e = "tests\LayoutFix.WindowsE2E\bin\Release\net8.0-windows\win-x64\LayoutFix.WindowsE2E.exe"
+          & $e2e --settings-diagnostic-test
+          if ($LASTEXITCODE -ne 0) { throw "Settings diagnostic E2E failed with $LASTEXITCODE." }
+          & $e2e --settings-registry-diagnostic-test
+          if ($LASTEXITCODE -ne 0) { throw "Settings registry diagnostic E2E failed with $LASTEXITCODE." }
+          & $e2e --settings-migration-lock-test
+          if ($LASTEXITCODE -ne 0) { throw "Settings migration lock E2E failed with $LASTEXITCODE." }
+          & $e2e --settings-recovery-barrier-test
+          if ($LASTEXITCODE -ne 0) { throw "Settings recovery barrier E2E failed with $LASTEXITCODE." }
+          & $e2e --settings-concurrency-test
+          if ($LASTEXITCODE -ne 0) { throw "Settings concurrency E2E failed with $LASTEXITCODE." }
+          & $e2e --translation-history-durability-test
+          if ($LASTEXITCODE -ne 0) { throw "Translation history durability E2E failed with $LASTEXITCODE." }
+          & $e2e --logger-concurrency-test
+          if ($LASTEXITCODE -ne 0) { throw "Logger concurrency E2E failed with $LASTEXITCODE." }
+          & $e2e --compatibility-probe-test
+          if ($LASTEXITCODE -ne 0) { throw "Compatibility probe E2E failed with $LASTEXITCODE." }
+          $leaks = @(Get-ChildItem $env:TEMP -Directory -Filter "LayoutFix.PRIVATE_SETTINGS_DIAGNOSTIC_PATH.*" -ErrorAction SilentlyContinue)
+          if ($leaks.Count -ne 0) { throw "Settings diagnostic E2E left temporary directories behind." }
+          $registryLeaks = @(Get-ChildItem $env:TEMP -Directory -Filter "LayoutFix.PRIVATE_SETTINGS_REGISTRY_DIAGNOSTIC.*" -ErrorAction SilentlyContinue)
+          if ($registryLeaks.Count -ne 0) { throw "Settings registry diagnostic E2E left temporary directories behind." }
+          $migrationLeaks = @(Get-ChildItem $env:TEMP -Directory -Filter "LayoutFix.PRIVATE_SETTINGS_MIGRATION_LOCK.*" -ErrorAction SilentlyContinue)
+          if ($migrationLeaks.Count -ne 0) { throw "Settings migration lock E2E left temporary directories behind." }
+          $recoveryLeaks = @(Get-ChildItem $env:TEMP -Directory -Filter "LayoutFix.PRIVATE_SETTINGS_RECOVERY_BARRIER.*" -ErrorAction SilentlyContinue)
+          if ($recoveryLeaks.Count -ne 0) { throw "Settings recovery barrier E2E left temporary directories behind." }
+          $concurrencyLeaks = @(Get-ChildItem $env:TEMP -Directory -Filter "LayoutFix.PRIVATE_SETTINGS_CONCURRENCY.*" -ErrorAction SilentlyContinue)
+          if ($concurrencyLeaks.Count -ne 0) { throw "Settings concurrency E2E left temporary directories behind." }
+          $historyLeaks = @(Get-ChildItem $env:TEMP -Directory -Filter "LayoutFix.PRIVATE_TRANSLATION_HISTORY_DURABILITY.*" -ErrorAction SilentlyContinue)
+          if ($historyLeaks.Count -ne 0) { throw "Translation history durability E2E left temporary directories behind." }
+          $loggerLeaks = @(Get-ChildItem $env:TEMP -Directory -Filter "LayoutFix.PRIVATE_LOGGER_CONCURRENCY.*" -ErrorAction SilentlyContinue)
+          if ($loggerLeaks.Count -ne 0) { throw "Logger concurrency E2E left temporary directories behind." }
+
+      - name: Render settings UI smoke snapshot
+        shell: pwsh
+        run: |
+          $e2e = "tests\LayoutFix.WindowsE2E\bin\Release\net8.0-windows\win-x64\LayoutFix.WindowsE2E.exe"
+          $snapshots = @(
+            @{ Name = "general"; Tab = "General" },
+            @{ Name = "general-ru"; Tab = "General"; Culture = "ru" },
+            @{ Name = "general-uk"; Tab = "General"; Culture = "uk" },
+            @{ Name = "languages"; Tab = "Languages" },
+            @{ Name = "languages-ru"; Tab = "Languages"; Culture = "ru" },
+            @{ Name = "languages-uk"; Tab = "Languages"; Culture = "uk" },
+            @{ Name = "hotkeys"; Tab = "Hotkeys" },
+            @{ Name = "exceptions"; Tab = "Exceptions" },
+            @{ Name = "exceptions-ru"; Tab = "Exceptions"; Culture = "ru" },
+            @{ Name = "exceptions-uk"; Tab = "Exceptions"; Culture = "uk" },
+            @{ Name = "dictionary"; Tab = "Dictionary" },
+            @{ Name = "translation"; Tab = "Translate" },
+            @{ Name = "about"; Tab = "About" },
+            @{ Name = "about-ru"; Tab = "About"; Culture = "ru" },
+            @{ Name = "about-uk"; Tab = "About"; Culture = "uk" }
+          )
+          foreach ($snapshot in $snapshots) {
+            $path = "artifacts\e2e\settings-$($snapshot.Name).png"
+            if ($snapshot.Culture) {
+              & $e2e --settings-snapshot $path $snapshot.Tab $snapshot.Culture
+            } else {
+              & $e2e --settings-snapshot $path $snapshot.Tab
+            }
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $path)) {
+              throw "$($snapshot.Tab) settings snapshot failed with $LASTEXITCODE."
+            }
+          }
+
+      - name: Verify isolated translation worker
+        shell: pwsh
+        run: |
+          $e2e = "tests\LayoutFix.WindowsE2E\bin\Release\net8.0-windows\win-x64\LayoutFix.WindowsE2E.exe"
+          $app = "src\LayoutFix\bin\Release\net8.0-windows\win-x64\LayoutFix.exe"
+          & $e2e --worker-isolation-test $app
+          if ($LASTEXITCODE -ne 0) { throw "Translation worker isolation test failed with $LASTEXITCODE." }
+
+      - name: Verify secure text targets
+        shell: pwsh
+        run: |
+          $e2e = "tests\LayoutFix.WindowsE2E\bin\Release\net8.0-windows\win-x64\LayoutFix.WindowsE2E.exe"
+          & $e2e --clipboard-formats-test
+          if ($LASTEXITCODE -ne 0) { throw "Clipboard formats E2E failed with $LASTEXITCODE." }
+          & $e2e --secure-target-test
+          if ($LASTEXITCODE -ne 0) { throw "Secure target E2E failed with $LASTEXITCODE." }
+          & $e2e --noneditable-pipeline-test
+          if ($LASTEXITCODE -ne 0) { throw "Non-editable pipeline E2E failed with $LASTEXITCODE." }
+          & $e2e --noneditable-exit-race-test
+          if ($LASTEXITCODE -ne 0) { throw "Non-editable exit-race E2E failed with $LASTEXITCODE." }
+          & $e2e --dictionary-performance-test
+          if ($LASTEXITCODE -ne 0) { throw "Dictionary performance E2E failed with $LASTEXITCODE." }
+          & $e2e --startup-lifecycle-test $app
+          if ($LASTEXITCODE -ne 0) { throw "Production startup lifecycle E2E failed with $LASTEXITCODE." }
+          & $e2e --startup-recovery-test $app
+          if ($LASTEXITCODE -ne 0) { throw "Production startup recovery E2E failed with $LASTEXITCODE." }
+          & $e2e --session-recovery-test $app
+          if ($LASTEXITCODE -ne 0) { throw "Production session recovery E2E failed with $LASTEXITCODE." }
+          & tests\Run-AutoCorrectionE2E.ps1 -Runs 3 -SoakIterations 25 -NoBuild
+          & tests\Run-PartialInputE2E.ps1 -Runs 3 -NoBuild
+          & tests\Run-SelectionOwnershipE2E.ps1 -Runs 3 -NoBuild
+          & tests\Run-BrowserCompatibilityE2E.ps1 -Runs 1 -NoBuild
+
+      - name: Verify configurable hotkeys
+        shell: pwsh
+        run: tests\Run-ConfigurableHotkeyE2E.ps1 -Runs 1 -NoBuild
+
+      - name: Verify installer existing-session guard
+        shell: pwsh
+        run: tests\Run-InstallerExistingProcessGuardE2E.ps1
+
+      - name: Verify translator behavior and localization
+        shell: pwsh
+        run: |
+          $e2e = "tests\LayoutFix.WindowsE2E\bin\Release\net8.0-windows\win-x64\LayoutFix.WindowsE2E.exe"
+          & $e2e --translator-behavior-test
+          if ($LASTEXITCODE -ne 0) { throw "Translator behavior E2E failed with $LASTEXITCODE." }
+          & $e2e --translator-localization-test
+          if ($LASTEXITCODE -ne 0) { throw "Translator localization E2E failed with $LASTEXITCODE." }
+          & $e2e --notification-focus-test
+          if ($LASTEXITCODE -ne 0) { throw "Notification focus E2E failed with $LASTEXITCODE." }
+
+      - name: Publish Windows application
+        run: dotnet publish src\LayoutFix\LayoutFix.csproj -c Release -r win-x64 --self-contained true --no-restore
+
+      - name: Verify and smoke-test published application
+        shell: pwsh
+        run: |
+          $publish = "src\LayoutFix\bin\Release\net8.0-windows\win-x64\publish"
+          $runtimeRoots = @()
+          if (Test-Path "$publish\runtimes") {
+            $runtimeRoots = @(Get-ChildItem "$publish\runtimes" -Directory | ForEach-Object Name)
+          }
+          if ($runtimeRoots.Count -ne 0) {
+            throw "Publish contains unexpected runtime roots: $($runtimeRoots -join ', ')."
+          }
+          $mainDeps = Get-Content "$publish\LayoutFix.deps.json" -Raw
+          if ($mainDeps.Contains("LLamaSharp") -or (Test-Path "$publish\LLamaSharp.dll")) {
+            throw "Main application still contains a direct LLamaSharp dependency."
+          }
+          $worker = "$publish\translation-worker\LayoutFix.TranslationWorker.dll"
+          if (-not (Test-Path $worker)) { throw "Translation worker is missing from publish output." }
+          $workerRuntimeRoots = @(Get-ChildItem "$publish\translation-worker\runtimes" -Directory | ForEach-Object Name)
+          if ($workerRuntimeRoots.Count -ne 1 -or $workerRuntimeRoots[0] -ne "win-x64") {
+            throw "Translation worker contains unexpected platform runtimes."
+          }
+          $privateNames = @("settings.json", "translation_history.json", "layoutfix.log")
+          $leaks = @(Get-ChildItem $publish -Recurse -File | Where-Object {
+            $_.Name -in $privateNames -or $_.Extension -eq ".pdb"
+          })
+          if ($leaks.Count -gt 0) { throw "Publish contains private/debug files." }
+          $expectedDictionaries = @(
+            "bg", "cs", "da", "de", "el", "en", "es", "fi", "fr",
+            "he", "hu", "hy", "it", "ka", "kk", "nl", "no", "pl",
+            "pt", "ro", "ru", "sk", "sr", "sv", "th", "tr", "uk"
+          )
+          $missingDictionaries = @($expectedDictionaries | Where-Object {
+            $path = "$publish\Dictionaries\$_.txt"
+            -not (Test-Path $path) -or (Get-Item $path).Length -eq 0
+          })
+          if ($missingDictionaries.Count -gt 0) {
+            throw "Publish is missing dictionaries: $($missingDictionaries -join ', ')."
+          }
+          $frequencyDictionaries = @("en", "ru", "uk")
+          $missingFrequencyData = @($frequencyDictionaries | Where-Object {
+            -not (Select-String -LiteralPath "$publish\Dictionaries\$_.txt" -Pattern '^\S+\s+\d+$' -Quiet)
+          })
+          if ($missingFrequencyData.Count -gt 0) {
+            throw "Publish dictionaries lost frequency data: $($missingFrequencyData -join ', ')."
+          }
+          $smokeLog = Join-Path $env:RUNNER_TEMP "layoutfix-smoke.log"
+          Remove-Item -LiteralPath $smokeLog -Force -ErrorAction SilentlyContinue
+          $env:LAYOUTFIX_SMOKE_LOG = $smokeLog
+          dotnet "$publish\LayoutFix.dll" --smoke-test
+          if ($LASTEXITCODE -ne 0) { throw "Published application smoke test failed." }
+          if (-not (Select-String -LiteralPath $smokeLog -Pattern 'profile:isolated' -Quiet) -or
+              -not (Select-String -LiteralPath $smokeLog -Pattern 'dictionaries:warmed' -Quiet) -or
+              -not (Select-String -LiteralPath $smokeLog -Pattern 'profile:cleaned' -Quiet)) {
+            throw "Published smoke test did not isolate and clean its temporary profile."
+          }
+          $e2e = "tests\LayoutFix.WindowsE2E\bin\Release\net8.0-windows\win-x64\LayoutFix.WindowsE2E.exe"
+          & $e2e --startup-lifecycle-test "$publish\LayoutFix.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Published startup lifecycle E2E failed with $LASTEXITCODE." }
+          & $e2e --startup-recovery-test "$publish\LayoutFix.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Published startup recovery E2E failed with $LASTEXITCODE." }
+          & $e2e --session-recovery-test "$publish\LayoutFix.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Published session recovery E2E failed with $LASTEXITCODE." }
+          $expectedVersion = "1.0.12.0"
+          $firstPartyBinaries = @(
+            "$publish\LayoutFix.exe",
+            "$publish\LayoutFix.Core.dll",
+            "$publish\LayoutFix.Infrastructure.dll",
+            "$publish\translation-worker\LayoutFix.TranslationWorker.dll"
+          )
+          $versionMismatches = @($firstPartyBinaries | Where-Object {
+            (Get-Item -LiteralPath $_).VersionInfo.FileVersion -ne $expectedVersion
+          })
+          if ($versionMismatches.Count -gt 0) {
+            throw "First-party binary version mismatch: $($versionMismatches -join ', ')."
+          }

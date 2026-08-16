@@ -47,4 +47,62 @@ public class LayoutConverterTests
         var result = converter.ConvertTo("Ghbdtn", _ru, _en);
         Assert.Equal("Привет", result);
     }
+
+    [Fact]
+    public void ConvertTo_DuplicateUnshiftedSourceOutput_DoesNotGuessOrThrow()
+    {
+        var source = new Layout
+        {
+            Code = "custom-source",
+            Keys = new Dictionary<string, string>
+            {
+                ["a"] = "x",
+                ["b"] = "x",
+                ["c"] = "y"
+            }
+        };
+        var target = new Layout
+        {
+            Code = "custom-target",
+            Keys = new Dictionary<string, string>
+            {
+                ["a"] = "α",
+                ["b"] = "β",
+                ["c"] = "γ"
+            }
+        };
+
+        var result = new LayoutConverter().ConvertTo("xy", target, source);
+
+        Assert.Equal("xγ", result);
+    }
+
+    [Fact]
+    public void ConvertTo_DuplicateShiftedSourceOutput_DoesNotGuessOrThrow()
+    {
+        var source = new Layout
+        {
+            Code = "custom-source",
+            ShiftKeys = new Dictionary<string, string>
+            {
+                ["a"] = "X",
+                ["b"] = "X",
+                ["c"] = "Y"
+            }
+        };
+        var target = new Layout
+        {
+            Code = "custom-target",
+            ShiftKeys = new Dictionary<string, string>
+            {
+                ["a"] = "Α",
+                ["b"] = "Β",
+                ["c"] = "Γ"
+            }
+        };
+
+        var result = new LayoutConverter().ConvertTo("XY", target, source);
+
+        Assert.Equal("XΓ", result);
+    }
 }

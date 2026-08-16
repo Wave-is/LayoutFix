@@ -1,24 +1,46 @@
 using LayoutFix.Core.Interfaces;
 using LayoutFix.UI;
 using System.Windows.Forms;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace LayoutFix.Services;
 
 public class TranslatorWindowProvider : ITranslatorWindowProvider
 {
+    private readonly ITranslationService _translationService;
+    private readonly IOfflineTranslationService _offlineService;
+    private readonly ITranslationHistoryService _historyService;
+    private readonly ILocalizationService _localizationService;
+    private readonly ISettingsService _settingsService;
+    private readonly ILoggerService _logger;
     private TranslatorForm? _form;
+
+    public TranslatorWindowProvider(
+        ITranslationService translationService,
+        IOfflineTranslationService offlineService,
+        ITranslationHistoryService historyService,
+        ILocalizationService localizationService,
+        ISettingsService settingsService,
+        ILoggerService logger)
+    {
+        _translationService = translationService;
+        _offlineService = offlineService;
+        _historyService = historyService;
+        _localizationService = localizationService;
+        _settingsService = settingsService;
+        _logger = logger;
+    }
 
     public void ShowTranslator(string initialText = "")
     {
         if (_form == null || _form.IsDisposed)
         {
-            var translationService = AppHost.Services!.GetRequiredService<ITranslationService>();
-            var offlineService = AppHost.Services!.GetRequiredService<IOfflineTranslationService>();
-            var locService = AppHost.Services!.GetRequiredService<ILocalizationService>();
-            var settingsService = AppHost.Services!.GetRequiredService<ISettingsService>();
-            var historyService = AppHost.Services!.GetRequiredService<ITranslationHistoryService>();
-            _form = new TranslatorForm(translationService, offlineService, historyService, locService, settingsService);
+            _form = new TranslatorForm(
+                _translationService,
+                _offlineService,
+                _historyService,
+                _localizationService,
+                _settingsService,
+                _logger);
             _form.FormClosed += (s, e) => _form = null;
         }
 
