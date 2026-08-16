@@ -903,7 +903,7 @@ public class AutoConversionServiceTests
 
         hook.Press("x", "x");
         guard.Release();
-        await Task.Delay(100);
+        await activeWindow.SecondSwitchRequested.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         Assert.Equal("ru-RU", activeWindow.LayoutCode);
         Assert.Equal(["en-US", "ru-RU"], activeWindow.SwitchHistory);
@@ -1382,6 +1382,8 @@ public class AutoConversionServiceTests
         public bool ApplySwitchImmediately { get; set; } = true;
         public TaskCompletionSource SwitchRequested { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource SecondSwitchRequested { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ActiveWindowContext CaptureActiveWindow() => Window;
         public bool IsSameActiveWindow(ActiveWindowContext context) =>
             IsCurrentWindow && context == Window;
@@ -1393,6 +1395,8 @@ public class AutoConversionServiceTests
             SwitchedLayout = layoutCode;
             SwitchHistory.Add(layoutCode);
             SwitchRequested.TrySetResult();
+            if (SwitchHistory.Count == 2)
+                SecondSwitchRequested.TrySetResult();
             if (ApplySwitchImmediately)
                 LayoutCode = layoutCode;
             return true;

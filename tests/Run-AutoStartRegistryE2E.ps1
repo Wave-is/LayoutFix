@@ -1,7 +1,8 @@
 $ErrorActionPreference = 'Stop'
 
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$artifacts = (Resolve-Path (Join-Path $workspace 'artifacts')).Path
+$artifacts = [IO.Directory]::CreateDirectory(
+    (Join-Path $workspace 'artifacts')).FullName
 $testDirectory = [IO.Path]::GetFullPath((Join-Path $artifacts 'autostart registry e2e'))
 $requiredPrefix = $artifacts + [IO.Path]::DirectorySeparatorChar
 if (-not $testDirectory.StartsWith($requiredPrefix, [StringComparison]::OrdinalIgnoreCase)) {
