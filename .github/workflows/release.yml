@@ -301,7 +301,9 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ github.ref_name }}".TrimStart('v')
-          & tests\Run-InstallerE2E.ps1 -Version $version
+          & tests\Run-InstallerE2E.ps1 `
+            -Version $version `
+            -CompilerPath "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 
       - name: Generate installer checksum
         shell: pwsh

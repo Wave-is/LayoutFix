@@ -5,11 +5,26 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidatePattern('^[A-Za-z0-9._-]+$')]
-    [string]$ProtectedProcessName = 'LayoutFix'
+    [string]$ProtectedProcessName = 'LayoutFix',
+
+    [Parameter(Mandatory = $false)]
+    [string]$CompilerPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$resolvedCompilerPath = if ([string]::IsNullOrWhiteSpace($CompilerPath)) {
+    [IO.Path]::GetFullPath((Join-Path $workspace '.tools\inno7\ISCC.exe'))
+}
+elseif ([IO.Path]::IsPathRooted($CompilerPath)) {
+    [IO.Path]::GetFullPath($CompilerPath)
+}
+else {
+    [IO.Path]::GetFullPath((Join-Path $workspace $CompilerPath))
+}
+if (-not (Test-Path -LiteralPath $resolvedCompilerPath -PathType Leaf)) {
+    throw "Inno Setup compiler is missing: $resolvedCompilerPath"
+}
 $artifacts = (Resolve-Path (Join-Path $workspace 'artifacts')).Path
 $testDirectory = [IO.Path]::GetFullPath((Join-Path $artifacts "installer-e2e-$Version"))
 $requiredPrefix = $artifacts + [IO.Path]::DirectorySeparatorChar
@@ -113,7 +128,7 @@ $env:LAYOUTFIX_SMOKE_LOG = $smokeLog
 try {
     Push-Location $workspace
     try {
-        & '.\.tools\inno7\ISCC.exe' "/DMyAppVersion=$Version" '/DLayoutFixTestInstall=1' 'installer.iss' | Out-Null
+        & $resolvedCompilerPath "/DMyAppVersion=$Version" '/DLayoutFixTestInstall=1' 'installer.iss' | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "Test installer compilation failed with exit code $LASTEXITCODE."
         }
