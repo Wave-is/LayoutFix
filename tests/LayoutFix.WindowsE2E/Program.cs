@@ -4321,7 +4321,8 @@ internal static class Program
             180,
             false,
             [["meeting"], ["begin", "start"], ["nine", "9"]],
-            LightExpectation: TranslationCaseExpectation.Excluded),
+            LightExpectation: TranslationCaseExpectation.Excluded,
+            AlmaExpectation: TranslationCaseExpectation.ValidOrSafeRejection),
         new(
             "es-en-document",
             "Guarda el documento antes de cerrar la ventana.",
