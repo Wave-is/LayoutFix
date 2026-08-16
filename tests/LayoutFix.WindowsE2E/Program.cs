@@ -5283,18 +5283,15 @@ internal static class Program
                 }
 
                 SendExternalKeys(
-                    (ushort)'G',
-                    (ushort)'H',
-                    (ushort)'B',
-                    (ushort)'D',
-                    (ushort)'T',
-                    (ushort)'N',
+                    (ushort)'C',
+                    (ushort)'S',
+                    (ushort)'Y',
                     0x20);
                 deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
-                while (DateTime.UtcNow < deadline && editor.Text != "The' tls ofc yt ykj ytn_ nfr привет ")
+                while (DateTime.UtcNow < deadline && editor.Text != "The' tls ofc yt ykj ytn_ nfr сын ")
                     await Task.Delay(25);
 
-                if (editor.Text != "The' tls ofc yt ykj ytn_ nfr привет ")
+                if (editor.Text != "The' tls ofc yt ykj ytn_ nfr сын ")
                 {
                     Console.Error.WriteLine(
                         $"auto-correction:unambiguous-ru=" +
@@ -5305,7 +5302,7 @@ internal static class Program
 
                 SendExternalKeys((ushort)'V', (ushort)'B', (ushort)'H', 0x20);
                 await Task.Delay(300);
-                if (editor.Text != "The' tls ofc yt ykj ytn_ nfr привет мир ")
+                if (editor.Text != "The' tls ofc yt ykj ytn_ nfr сын мир ")
                 {
                     Console.Error.WriteLine(
                         $"auto-correction:post-switch-text={JsonSerializer.Serialize(editor.Text)}");
