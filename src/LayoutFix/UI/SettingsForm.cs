@@ -85,6 +85,18 @@ public class SettingsForm : Form
 
     private void InitializeComponent()
     {
+        // This form's whole layout is hand-placed pixel coordinates (Location,
+        // row-spacing increments like "y += 40", fixed widths) with no
+        // Designer-generated baseline. The app is PerMonitorV2 DPI-aware, so
+        // at DPI above 100% GDI+ renders every label's text taller/wider in
+        // device pixels while these literal pixel budgets stay identical,
+        // which is exactly the overlap reported at 150% scaling. AutoScaleMode
+        // = Dpi with an explicit 96 DPI baseline makes WinForms scale the
+        // entire built control tree (locations, sizes, fonts) by the real
+        // monitor-DPI ratio in one pass, which keeps every hand-tuned margin
+        // proportionally correct at any scale factor.
+        this.AutoScaleMode = AutoScaleMode.Dpi;
+        this.AutoScaleDimensions = new SizeF(96F, 96F);
         this.Text = _locService.GetString("Settings_Title", "LayoutFix");
         this.Size = new Size(1150, 700);
         this.StartPosition = FormStartPosition.CenterScreen;

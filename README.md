@@ -1,6 +1,6 @@
 <div align="center">
   <img src="assets/logo.png" alt="LayoutFix Logo" width="128" />
-  <h1>LayoutFix v1.0.13</h1>
+  <h1>LayoutFix v1.0.14</h1>
   <p><b>A safety-first Windows keyboard-layout fixer and text translator.</b></p>
   <p>
     <a href="#english">English</a> •
@@ -46,7 +46,7 @@ A lightweight, powerful Windows background utility designed to solve common typi
 2. Download `LayoutFix_Setup.exe`.
 3. Verify the adjacent `LayoutFix_Setup.exe.sha256` checksum, then install the app. It will silently run in your system tray.
 
-> **Release-candidate notice:** the v1.0.13 installer is not Authenticode-signed yet, so Windows SmartScreen may show an unknown-publisher warning. Install it only after verifying the checksum. Automatic correction remains disabled by default.
+> **Release-candidate notice:** the v1.0.14 installer is not Authenticode-signed yet, so Windows SmartScreen may show an unknown-publisher warning. Install it only after verifying the checksum. Automatic correction remains disabled by default.
 
 ---
 
@@ -83,7 +83,7 @@ A lightweight, powerful Windows background utility designed to solve common typi
 2. Скачайте `LayoutFix_Setup.exe`.
 3. Сверьте контрольную сумму с файлом `LayoutFix_Setup.exe.sha256`, затем установите программу — она свернется в системный трей и будет работать в фоне.
 
-> **Статус release candidate:** установщик v1.0.13 пока не подписан Authenticode, поэтому Windows SmartScreen может показать предупреждение о неизвестном издателе. Устанавливайте его только после проверки контрольной суммы. Автоисправление по умолчанию выключено.
+> **Статус release candidate:** установщик v1.0.14 пока не подписан Authenticode, поэтому Windows SmartScreen может показать предупреждение о неизвестном издателе. Устанавливайте его только после проверки контрольной суммы. Автоисправление по умолчанию выключено.
 
 ---
 
@@ -118,7 +118,7 @@ A lightweight, powerful Windows background utility designed to solve common typi
 2. Завантажте `LayoutFix_Setup.exe`.
 3. Звірте контрольну суму з файлом `LayoutFix_Setup.exe.sha256`, потім установіть програму — вона згорнеться в системний трей.
 
-> **Статус release candidate:** інсталятор v1.0.13 ще не підписаний Authenticode, тому Windows SmartScreen може показати попередження про невідомого видавця. Встановлюйте його лише після перевірки контрольної суми. Автовиправлення типово вимкнене.
+> **Статус release candidate:** інсталятор v1.0.14 ще не підписаний Authenticode, тому Windows SmartScreen може показати попередження про невідомого видавця. Встановлюйте його лише після перевірки контрольної суми. Автовиправлення типово вимкнене.
 
 ---
 

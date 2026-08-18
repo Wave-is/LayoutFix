@@ -98,6 +98,12 @@ public class TranslatorForm : Form
 
     private void InitializeComponent()
     {
+        // See the matching comment in SettingsForm: this form mixes Dock-based
+        // layout with several hand-placed pixel widths (language combos,
+        // swap/copy buttons), so it needs the same explicit DPI baseline to
+        // stay correct above 100% Windows scaling.
+        this.AutoScaleMode = AutoScaleMode.Dpi;
+        this.AutoScaleDimensions = new SizeF(96F, 96F);
         this.Text = _locService.GetString("Translator_Title", "LayoutFix Translator");
         this.Size = new Size(1000, 600);
         this.StartPosition = FormStartPosition.CenterScreen;

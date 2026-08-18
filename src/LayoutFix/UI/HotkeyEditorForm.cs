@@ -38,6 +38,11 @@ public class HotkeyEditorForm : Form
 
     private void InitializeComponent()
     {
+        // See the matching comment in SettingsForm.InitializeComponent: this
+        // dialog's width (DialogContentWidth, the instruction's wrap width)
+        // is still hand-placed pixels, so it needs the same DPI baseline.
+        this.AutoScaleMode = AutoScaleMode.Dpi;
+        this.AutoScaleDimensions = new SizeF(96F, 96F);
         this.Text = _locService.GetString("HotkeyEditor_Title", "Choose key combination");
         this.StartPosition = FormStartPosition.CenterParent;
         this.FormBorderStyle = FormBorderStyle.FixedDialog;

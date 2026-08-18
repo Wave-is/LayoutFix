@@ -247,7 +247,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Published startup recovery E2E failed with $LASTEXITCODE." }
           & $e2e --session-recovery-test "$publish\LayoutFix.exe"
           if ($LASTEXITCODE -ne 0) { throw "Published session recovery E2E failed with $LASTEXITCODE." }
-          $expectedVersion = "1.0.13.0"
+          $expectedVersion = "1.0.14.0"
           $firstPartyBinaries = @(
             "$publish\LayoutFix.exe",
             "$publish\LayoutFix.Core.dll",
