@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Linq;
@@ -85,7 +86,7 @@ public class SettingsForm : Form
     private void InitializeComponent()
     {
         this.Text = _locService.GetString("Settings_Title", "LayoutFix");
-        this.Size = new Size(1050, 650);
+        this.Size = new Size(1150, 700);
         this.StartPosition = FormStartPosition.CenterScreen;
         this.Font = new Font("Segoe UI", 10F);
         this.FormBorderStyle = FormBorderStyle.None;
@@ -107,7 +108,7 @@ public class SettingsForm : Form
         _pnlSidebar = new Panel
         {
             Dock = DockStyle.Left,
-            Width = 220,
+            Width = 240,
             BackColor = _sidebarColor,
             Padding = new Padding(0, 20, 0, 0)
         };
@@ -154,6 +155,42 @@ public class SettingsForm : Form
                 "DiagnosticCode: LF-ST-003 | Action: settings-save | Stage: unknown | Outcome: failed",
                 ex);
             ShowSettingsSaveError();
+        }
+    }
+
+    private void OfferRestart()
+    {
+        var result = MessageBox.Show(
+            this,
+            _locService.GetString(
+                "Settings_RestartRequiredMessage",
+                "Language changed. Restart LayoutFix now to apply all changes?"),
+            _locService.GetString("Settings_RestartRequired", "Restart required"),
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Information);
+
+        if (result != DialogResult.Yes)
+            return;
+
+        try
+        {
+            var exePath = Application.ExecutablePath;
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                // A short delay lets this process release the single-instance
+                // mutex before the relaunched one starts, or it would see the
+                // mutex still held and immediately exit with nothing running.
+                Arguments = $"/C timeout /t 1 /nobreak >nul & start \"\" \"{exePath}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            });
+            Application.Exit();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Failed to restart LayoutFix after a language change", ex);
         }
     }
 
@@ -278,7 +315,7 @@ public class SettingsForm : Form
             Height = 50,
             FlatStyle = FlatStyle.Flat,
             TextAlign = ContentAlignment.MiddleLeft,
-            Font = new Font("Segoe UI", 11F, FontStyle.Regular),
+            Font = new Font("Segoe UI", 10.5F, FontStyle.Regular),
             ForeColor = Color.DarkGray,
             Cursor = Cursors.Hand,
             BackColor = Color.Transparent
@@ -294,7 +331,7 @@ public class SettingsForm : Form
                 {
                     b.ForeColor = _bgColor == Color.FromArgb(28, 28, 30) ? Color.DarkGray : Color.DimGray;
                     b.BackColor = Color.Transparent;
-                    b.Font = new Font("Segoe UI", 11F, FontStyle.Regular);
+                    b.Font = new Font("Segoe UI", 10.5F, FontStyle.Regular);
                 }
             }
             
@@ -304,7 +341,7 @@ public class SettingsForm : Form
             targetPanel.BeginInvoke(() => ResetScrollPositions(targetPanel));
 
             btn.ForeColor = Color.White;
-            btn.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
+            btn.Font = new Font("Segoe UI", 10.5F, FontStyle.Bold);
             btn.BackColor = _accentColor;
             _activeTabButton = btn;
         };
@@ -364,9 +401,11 @@ public class SettingsForm : Form
         pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_Flags", "Use country flags in tray"), _currentSettings.UseFlagIcons, v => { _currentSettings.UseFlagIcons = v; SaveSettings(); }, y)); y += 50;
         pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_Logging", "Diagnostic logging"), _currentSettings.LoggingEnabled, v => { _currentSettings.LoggingEnabled = v; SaveSettings(); }, y)); y += 50;
 
-        var pnlTheme = new Panel { Width = 740, Height = 40, Location = new Point(0, y) };
         var lblTheme = new Label { Text = _locService.GetString("Settings_Theme", "Color theme"), ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
-        var cmbTheme = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(590, 8), BackColor = _sidebarColor, ForeColor = _textColor };
+        MeasureNow(lblTheme);
+        int themeComboX = Math.Max(lblTheme.Right + 24, MinSettingsRowWidth - 150);
+        var cmbTheme = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(themeComboX, 8), BackColor = _sidebarColor, ForeColor = _textColor };
+        var pnlTheme = new Panel { Width = Math.Max(MinSettingsRowWidth, themeComboX + cmbTheme.Width), Height = 40, Location = new Point(0, y) };
         cmbTheme.Items.AddRange(new[]
         {
             _locService.GetString("Settings_ThemeAuto", "Follow Windows"),
@@ -386,10 +425,12 @@ public class SettingsForm : Form
         pnl.Controls.Add(pnlTheme);
         y += 50;
 
-        var pnlLang = new Panel { Width = 740, Height = 40, Location = new Point(0, y) };
         var lblLang = new Label { Text = _locService.GetString("Settings_InterfaceLanguage", "Interface language"), ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
-        var cmbLang = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(590, 8), BackColor = _sidebarColor, ForeColor = _textColor };
-        
+        MeasureNow(lblLang);
+        int langComboX = Math.Max(lblLang.Right + 24, MinSettingsRowWidth - 150);
+        var cmbLang = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(langComboX, 8), BackColor = _sidebarColor, ForeColor = _textColor };
+        var pnlLang = new Panel { Width = Math.Max(MinSettingsRowWidth, langComboX + cmbLang.Width), Height = 40, Location = new Point(0, y) };
+
         var locales = new LangItem[] {
             new LangItem{ Code="en", Name="English" }, new LangItem{ Code="ru", Name="Русский" }, new LangItem{ Code="uk", Name="Українська" },
             new LangItem{ Code="de", Name="Deutsch" }, new LangItem{ Code="pl", Name="Polski" }, new LangItem{ Code="es", Name="Español" },
@@ -412,13 +453,7 @@ public class SettingsForm : Form
                 _currentSettings.UiLanguage = code;
                 _locService.SetCulture(code);
                 SaveSettings();
-                MessageBox.Show(
-                    _locService.GetString(
-                        "Settings_RestartRequiredMessage",
-                        "Language changed. Restart LayoutFix to apply all changes."),
-                    _locService.GetString("Settings_RestartRequired", "Restart required"),
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                OfferRestart();
             }
         };
 
@@ -429,13 +464,29 @@ public class SettingsForm : Form
         _tabGeneral.Controls.Add(pnl);
     }
 
+    // The toggle is positioned relative to the label's actual rendered width
+    // (not a hardcoded X) so longer translations never overlap or get hidden
+    // behind the switch. The row itself grows to fit both, so nothing is
+    // silently clipped by the parent's bounds either.
+    private const int MinSettingsRowWidth = 740;
+
+    // AutoSize controls report a placeholder 100x23 size until they are
+    // parented (or otherwise laid out); reading .Right/.Bottom right after
+    // construction — as every "position sibling relative to this label"
+    // fix below does — would silently use that placeholder instead of the
+    // real rendered size. Forcing GetPreferredSize makes it correct
+    // regardless of parenting order or timing.
+    private static void MeasureNow(Control control) => control.Size = control.GetPreferredSize(Size.Empty);
+
     private Panel CreateToggleSetting(string title, bool initialValue, Action<bool> onChanged, int y)
     {
-        var pnl = new Panel { Width = 740, Height = 40, Location = new Point(0, y) };
         var lbl = new Label { Text = title, ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
-        var sw = new ToggleSwitch { Checked = initialValue, Location = new Point(690, 5), BackColor = _bgColor };
+        MeasureNow(lbl);
+        int switchX = Math.Max(lbl.Right + 24, MinSettingsRowWidth - 50);
+        var sw = new ToggleSwitch { Checked = initialValue, Location = new Point(switchX, 5), BackColor = _bgColor };
         sw.CheckedChanged += (s, e) => onChanged(sw.Checked);
-        
+
+        var pnl = new Panel { Width = Math.Max(MinSettingsRowWidth, switchX + sw.Width + 10), Height = 40, Location = new Point(0, y) };
         pnl.Controls.Add(lbl);
         pnl.Controls.Add(sw);
         return pnl;
@@ -622,13 +673,13 @@ public class SettingsForm : Form
     {
         var lbl = new Label { Text = title, ForeColor = _textColor, Font = new Font("Segoe UI", 10), AutoSize = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
         tlp.Controls.Add(lbl, 0, row);
-        
-        AssignTlpCell(tlp, action, hk1, 1, 1, 2, row);
-        AssignTlpCell(tlp, action, hk2, 2, 3, 4, row);
-        AssignTlpCell(tlp, action, hk3, 3, 5, 6, row);
+
+        AssignTlpCell(tlp, action, title, hk1, 1, 1, 2, row);
+        AssignTlpCell(tlp, action, title, hk2, 2, 3, 4, row);
+        AssignTlpCell(tlp, action, title, hk3, 3, 5, 6, row);
     }
 
-    private void AssignTlpCell(TableLayoutPanel tlp, string action, string expectedHotkey, int preset, int textCol, int chkCol, int row)
+    private void AssignTlpCell(TableLayoutPanel tlp, string action, string actionTitle, string expectedHotkey, int preset, int textCol, int chkCol, int row)
     {
         var config = _currentSettings.HotkeyConfigs.FirstOrDefault(c => c.Action == action && c.Preset == preset);
         if (config == null && action == "FixLayoutSelected")
@@ -662,7 +713,7 @@ public class SettingsForm : Form
         btn.FlatAppearance.BorderSize = 0;
         btn.Click += (s, e) =>
         {
-            using var editor = new HotkeyEditorForm(config.Hotkey, action);
+            using var editor = new HotkeyEditorForm(config.Hotkey, actionTitle, _locService);
             if (editor.ShowDialog(this) == DialogResult.OK)
             {
                 if (HasHotkeyConflict(config, editor.ResultHotkey))
@@ -926,7 +977,9 @@ public class SettingsForm : Form
         var button = new Button
         {
             Text = text,
-            Width = width,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowOnly,
+            MinimumSize = new Size(width, 28),
             Height = 28,
             BackColor = backColor,
             ForeColor = Color.White,
@@ -1177,18 +1230,19 @@ public class SettingsForm : Form
         }
         Panel? onlineSetting = null;
 
-        var credentialPanel = new Panel { Width = 700, Height = 40, Location = new Point(0, y) };
         var credentialLabel = new Label
         {
             Text = _locService.GetString("Settings_GoogleCloudApiKey", "Google Cloud API key"),
             ForeColor = _textColor,
+            Font = new Font("Segoe UI", 10F),
             AutoSize = true,
             Location = new Point(0, 9)
         };
+        MeasureNow(credentialLabel);
         var credentialInput = new TextBox
         {
             Width = 260,
-            Location = new Point(180, 5),
+            Location = new Point(credentialLabel.Right + 15, 5),
             UseSystemPasswordChar = true,
             MaxLength = 256,
             PlaceholderText = hasTranslationCredential
@@ -1198,24 +1252,31 @@ public class SettingsForm : Form
         var saveCredential = new Button
         {
             Text = _locService.GetString("Settings_SaveApiKey", "Save key"),
-            Width = 95,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowOnly,
+            MinimumSize = new Size(95, 30),
             Height = 30,
-            Location = new Point(450, 4),
             FlatStyle = FlatStyle.Flat,
             ForeColor = _textColor,
             BackColor = _sidebarColor
         };
+        MeasureNow(saveCredential);
+        saveCredential.Location = new Point(credentialInput.Right + 15, 4);
         var removeCredential = new Button
         {
             Text = _locService.GetString("Settings_RemoveApiKey", "Remove"),
-            Width = 95,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowOnly,
+            MinimumSize = new Size(95, 30),
             Height = 30,
-            Location = new Point(555, 4),
             FlatStyle = FlatStyle.Flat,
             ForeColor = _textColor,
             BackColor = _sidebarColor,
             Enabled = hasTranslationCredential
         };
+        MeasureNow(removeCredential);
+        removeCredential.Location = new Point(saveCredential.Right + 10, 4);
+        var credentialPanel = new Panel { Width = Math.Max(700, removeCredential.Right + 10), Height = 40, Location = new Point(0, y) };
         saveCredential.Click += (_, _) =>
         {
             if (string.IsNullOrWhiteSpace(credentialInput.Text)) return;
@@ -1287,7 +1348,9 @@ public class SettingsForm : Form
         y += 50;
 
         var tsHistory = CreateToggleSetting(
-            "Save translation history locally (contains your text)",
+            _locService.GetString(
+                "Settings_SaveHistoryLocally",
+                "Save translation history locally (contains your text)"),
             _currentSettings.TranslationHistoryEnabled,
             v => { _currentSettings.TranslationHistoryEnabled = v; SaveSettings(); },
             y);
@@ -1297,7 +1360,9 @@ public class SettingsForm : Form
         var clearHistory = new Button
         {
             Text = _locService.GetString("Settings_ClearTranslationHistory", "Clear saved translation history"),
-            Width = 280,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowOnly,
+            MinimumSize = new Size(280, 30),
             Height = 30,
             Location = new Point(0, y),
             FlatStyle = FlatStyle.Flat,
@@ -1333,21 +1398,23 @@ public class SettingsForm : Form
         pnl.Controls.Add(clearHistory);
         y += 42;
 
-        var lblModel = new Label { Text = _locService.GetString("Settings_ModelSelection", "Model selection:"), AutoSize = true, Location = new Point(0, y + 4), ForeColor = _textColor };
-        var cmbModel = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 350, Location = new Point(120, y), BackColor = _sidebarColor, ForeColor = _textColor };
+        var lblModel = new Label { Text = _locService.GetString("Settings_ModelSelection", "Model selection:"), Font = new Font("Segoe UI", 10F), AutoSize = true, Location = new Point(0, y + 4), ForeColor = _textColor };
+        MeasureNow(lblModel);
+        int modelComboX = lblModel.Right + 15;
+        var cmbModel = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 350, Location = new Point(modelComboX, y), BackColor = _sidebarColor, ForeColor = _textColor };
         cmbModel.Items.Add(new { Id = "light", Name = _locService.GetString("Settings_ModelLight", "Light Qwen 0.5B (398 MB, 4 languages)") });
         cmbModel.Items.Add(new { Id = "alma", Name = _locService.GetString("Settings_ModelAlma", "Specialized ALMA 7B (4.08 GB, 6 languages)") });
         cmbModel.Items.Add(new { Id = "pro", Name = _locService.GetString("Settings_ModelQwenPro", "Balanced Qwen2.5 1.5B (1.12 GB, 5 languages)") });
         cmbModel.ValueMember = "Id";
         cmbModel.DisplayMember = "Name";
-        
+
         cmbModel.SelectedIndex = _currentSettings.OfflineModelType == "pro" ? 2 : (_currentSettings.OfflineModelType == "alma" ? 1 : 0);
         pnl.Controls.Add(lblModel);
         pnl.Controls.Add(cmbModel);
         var lblModelCapabilities = new Label
         {
             AutoSize = true,
-            Location = new Point(220, y + 44),
+            Location = new Point(modelComboX, y + 44),
             ForeColor = _textColor
         };
         pnl.Controls.Add(lblModelCapabilities);
@@ -1497,18 +1564,20 @@ public class SettingsForm : Form
             new LangItem{ Code="pt", Name="Português" }
         };
 
-        pnl.Controls.Add(CreateLanguageDropdown("Translation Language 1", _currentSettings.TranslateLang1, locales.ToArray(), v => { _currentSettings.TranslateLang1 = v; SaveSettings(); }, ref y));
-        pnl.Controls.Add(CreateLanguageDropdown("Translation Language 2", _currentSettings.TranslateLang2, locales.ToArray(), v => { _currentSettings.TranslateLang2 = v; SaveSettings(); }, ref y));
-        pnl.Controls.Add(CreateLanguageDropdown("Translation Language 3", _currentSettings.TranslateLang3, locales.ToArray(), v => { _currentSettings.TranslateLang3 = v; SaveSettings(); }, ref y));
+        pnl.Controls.Add(CreateLanguageDropdown(_locService.GetString("Settings_TranslateLang1", "Translate to Language 1"), _currentSettings.TranslateLang1, locales.ToArray(), v => { _currentSettings.TranslateLang1 = v; SaveSettings(); }, ref y));
+        pnl.Controls.Add(CreateLanguageDropdown(_locService.GetString("Settings_TranslateLang2", "Translate to Language 2"), _currentSettings.TranslateLang2, locales.ToArray(), v => { _currentSettings.TranslateLang2 = v; SaveSettings(); }, ref y));
+        pnl.Controls.Add(CreateLanguageDropdown(_locService.GetString("Settings_TranslateLang3", "Translate to Language 3"), _currentSettings.TranslateLang3, locales.ToArray(), v => { _currentSettings.TranslateLang3 = v; SaveSettings(); }, ref y));
 
         _tabTranslate.Controls.Add(pnl);
     }
 
     private Panel CreateLanguageDropdown(string label, string currentVal, LangItem[] locales, Action<string> onChange, ref int y)
     {
-        var pnl = new Panel { Width = 500, Height = 40, Location = new Point(0, y) };
         var lbl = new Label { Text = label, ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
-        var cmb = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(350, 8), BackColor = _sidebarColor, ForeColor = _textColor, DisplayMember = "Name", ValueMember = "Code" };
+        MeasureNow(lbl);
+        int comboX = Math.Max(lbl.Right + 15, 350);
+        var cmb = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(comboX, 8), BackColor = _sidebarColor, ForeColor = _textColor, DisplayMember = "Name", ValueMember = "Code" };
+        var pnl = new Panel { Width = Math.Max(500, comboX + cmb.Width), Height = 40, Location = new Point(0, y) };
 
         cmb.Items.AddRange(locales.Cast<object>().ToArray());
         var selectedIndex = Array.FindIndex(locales, locale =>
@@ -1528,13 +1597,20 @@ public class SettingsForm : Form
 
     private void BuildAboutTab()
     {
-        var lblTitle = new Label { Text = _locService.GetString("Settings_About", "About LayoutFix"), ForeColor = _textColor, Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Top };
-        
-        var picLogo = new PictureBox 
-        { 
-            SizeMode = PictureBoxSizeMode.Zoom, 
-            Width = 100, Height = 100, 
-            Location = new Point(0, 50) 
+        // Wrapped in an AutoScroll panel like the other tabs: this tab's
+        // content is tall enough (logo, description, link, full diagnostics
+        // report, copy button) that without scrolling the bottom controls
+        // become unreachable whenever the window is short, at higher DPI, or
+        // with larger Windows text scaling.
+        var pnl = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+
+        var lblTitle = new Label { Text = _locService.GetString("Settings_About", "About LayoutFix"), ForeColor = _textColor, Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Location = new Point(0, 0) };
+
+        var picLogo = new PictureBox
+        {
+            SizeMode = PictureBoxSizeMode.Zoom,
+            Width = 100, Height = 100,
+            Location = new Point(0, 50)
         };
         
         string logoPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "logo.png");
@@ -1558,15 +1634,47 @@ public class SettingsForm : Form
             AutoSize = true,
             Location = new Point(120, 50)
         };
+        MeasureNow(lblDesc);
 
+        var linkGitHub = new LinkLabel
+        {
+            Text = _locService.GetString("Settings_ViewOnGitHub", "View on GitHub"),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 10),
+            LinkColor = _accentColor,
+            ActiveLinkColor = _accentColor,
+            VisitedLinkColor = _accentColor,
+            Location = new Point(120, lblDesc.Bottom + 8)
+        };
+        MeasureNow(linkGitHub);
+        const string repoUrl = "https://github.com/Wave-is/LayoutFix";
+        linkGitHub.Links.Add(0, linkGitHub.Text.Length, repoUrl);
+        linkGitHub.LinkClicked += (_, e) =>
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = e.Link?.LinkData as string ?? repoUrl,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError("Failed to open the GitHub page", exception);
+            }
+        };
+
+        int diagnosticsY = Math.Max(picLogo.Bottom, linkGitHub.Bottom) + 20;
         var lblDiagnostics = new Label
         {
             Text = _locService.GetString("Settings_DiagnosticsReport", "Safe diagnostic report"),
             ForeColor = _textColor,
             Font = new Font("Segoe UI", 11, FontStyle.Bold),
             AutoSize = true,
-            Location = new Point(0, 170)
+            Location = new Point(0, diagnosticsY)
         };
+        MeasureNow(lblDiagnostics);
         var lblDiagnosticsPrivacy = new Label
         {
             Text = _locService.GetString(
@@ -1574,8 +1682,8 @@ public class SettingsForm : Form
                 "Contains technical configuration counts only—no typed text, clipboard data, paths, API keys, or log contents."),
             ForeColor = Color.Gray,
             Font = new Font("Segoe UI", 9),
-            Location = new Point(0, 198),
-            Width = 740,
+            Location = new Point(0, lblDiagnostics.Bottom + 8),
+            Width = 780,
             Height = 34
         };
         var txtDiagnostics = new TextBox
@@ -1588,16 +1696,18 @@ public class SettingsForm : Form
             ForeColor = _textColor,
             BorderStyle = BorderStyle.FixedSingle,
             Font = new Font("Consolas", 9),
-            Location = new Point(0, 238),
-            Width = 740,
+            Location = new Point(0, lblDiagnosticsPrivacy.Bottom + 8),
+            Width = 780,
             Height = 238,
             AccessibleName = "DiagnosticsReport.Preview"
         };
         var btnCopyDiagnostics = new Button
         {
             Text = _locService.GetString("Settings_CopyDiagnostics", "Copy report"),
-            Location = new Point(0, 486),
-            Width = 160,
+            Location = new Point(0, txtDiagnostics.Bottom + 12),
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowOnly,
+            MinimumSize = new Size(160, 30),
             Height = 30,
             BackColor = _accentColor,
             ForeColor = Color.White,
@@ -1605,12 +1715,13 @@ public class SettingsForm : Form
             AccessibleName = "DiagnosticsReport.Copy"
         };
         btnCopyDiagnostics.FlatAppearance.BorderSize = 0;
+        MeasureNow(btnCopyDiagnostics);
         var lblCopyStatus = new Label
         {
             ForeColor = Color.Gray,
             Font = new Font("Segoe UI", 9),
             AutoSize = true,
-            Location = new Point(170, 493),
+            Location = new Point(btnCopyDiagnostics.Right + 10, txtDiagnostics.Bottom + 19),
             AccessibleName = "DiagnosticsReport.Status"
         };
         btnCopyDiagnostics.Click += (_, _) =>
@@ -1626,14 +1737,16 @@ public class SettingsForm : Form
             }
         };
 
-        _tabAbout.Controls.Add(picLogo);
-        _tabAbout.Controls.Add(lblDesc);
-        _tabAbout.Controls.Add(lblDiagnostics);
-        _tabAbout.Controls.Add(lblDiagnosticsPrivacy);
-        _tabAbout.Controls.Add(txtDiagnostics);
-        _tabAbout.Controls.Add(btnCopyDiagnostics);
-        _tabAbout.Controls.Add(lblCopyStatus);
-        _tabAbout.Controls.Add(lblTitle);
+        pnl.Controls.Add(picLogo);
+        pnl.Controls.Add(lblDesc);
+        pnl.Controls.Add(linkGitHub);
+        pnl.Controls.Add(lblDiagnostics);
+        pnl.Controls.Add(lblDiagnosticsPrivacy);
+        pnl.Controls.Add(txtDiagnostics);
+        pnl.Controls.Add(btnCopyDiagnostics);
+        pnl.Controls.Add(lblCopyStatus);
+        pnl.Controls.Add(lblTitle);
+        _tabAbout.Controls.Add(pnl);
     }
 
     [DllImport("user32.dll")]

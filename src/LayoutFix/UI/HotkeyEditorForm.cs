@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Windows.Forms;
+using LayoutFix.Core.Interfaces;
 using LayoutFix.Core.Models;
 
 namespace LayoutFix.UI;
@@ -17,19 +18,27 @@ public class HotkeyEditorForm : Form
 
     public string ResultHotkey { get; private set; }
     private readonly string _actionDescription;
+    private readonly ILocalizationService _locService;
     private bool _winPressed;
 
-    public HotkeyEditorForm(string initialHotkey, string actionDescription)
+    public HotkeyEditorForm(string initialHotkey, string actionDescription, ILocalizationService locService)
     {
         ResultHotkey = initialHotkey;
         _actionDescription = actionDescription;
+        _locService = locService;
         InitializeComponent();
     }
 
+    private const int DialogContentWidth = 335;
+
+    // AutoSize controls report a placeholder size until they are parented;
+    // forcing GetPreferredSize makes .Right/.Bottom correct immediately, so
+    // sibling controls can be positioned relative to them before layout.
+    private static void MeasureNow(Control control) => control.Size = control.GetPreferredSize(Size.Empty);
+
     private void InitializeComponent()
     {
-        this.Text = "Выбор комбинации клавиш";
-        this.Size = new Size(380, 240);
+        this.Text = _locService.GetString("HotkeyEditor_Title", "Choose key combination");
         this.StartPosition = FormStartPosition.CenterParent;
         this.FormBorderStyle = FormBorderStyle.FixedDialog;
         this.MaximizeBox = false;
@@ -40,7 +49,7 @@ public class HotkeyEditorForm : Form
 
         _lblActionDesc = new Label
         {
-            Text = "Действие:",
+            Text = _locService.GetString("HotkeyEditor_Action", "Action:"),
             Location = new Point(15, 15),
             AutoSize = true,
             ForeColor = SystemColors.ControlDarkDark
@@ -50,7 +59,7 @@ public class HotkeyEditorForm : Form
         {
             Text = _actionDescription,
             Location = new Point(15, 35),
-            Width = 335,
+            Width = DialogContentWidth,
             ReadOnly = true,
             BorderStyle = BorderStyle.None,
             BackColor = SystemColors.Control,
@@ -58,52 +67,72 @@ public class HotkeyEditorForm : Form
         };
         _txtActionName.GotFocus += (s, e) => this.Focus();
 
-        _gbCombo = new GroupBox
-        {
-            Text = "Комбинация",
-            Location = new Point(15, 70),
-            Size = new Size(335, 80)
-        };
-
+        // The instruction text may need two lines in some languages, so the
+        // hotkey field, the group box and the whole dialog height all follow
+        // from its actual rendered size instead of a fixed magic Y. AutoSize
+        // controls don't compute their real size until parented, so it's
+        // forced explicitly (MeasureNow) before any sibling reads .Bottom.
         _lblInstruction = new Label
         {
-            Text = "Установите курсор в поле и нажмите нужные клавиши:",
+            Text = _locService.GetString(
+                "HotkeyEditor_Instruction",
+                "Place the cursor in the field and press the desired keys:"),
             Location = new Point(15, 20),
             AutoSize = true,
+            MaximumSize = new Size(DialogContentWidth - 30, 0),
+            Font = new Font("Segoe UI", 9F),
             ForeColor = SystemColors.ControlDarkDark
         };
+        MeasureNow(_lblInstruction);
 
         _txtHotkey = new TextBox
         {
             Text = ResultHotkey,
-            Location = new Point(15, 45),
-            Width = 300,
+            Location = new Point(15, _lblInstruction.Bottom + 8),
+            Width = DialogContentWidth - 35,
             ReadOnly = true,
             BackColor = SystemColors.Window,
             Font = new Font("Segoe UI", 10F, FontStyle.Bold),
             Cursor = Cursors.IBeam
         };
 
+        _gbCombo = new GroupBox
+        {
+            Text = _locService.GetString("HotkeyEditor_Combination", "Combination"),
+            Location = new Point(15, 70),
+            Size = new Size(DialogContentWidth, _txtHotkey.Bottom + 15)
+        };
         _gbCombo.Controls.Add(_lblInstruction);
         _gbCombo.Controls.Add(_txtHotkey);
 
-        _btnSave = new Button
-        {
-            Text = "ОК",
-            Location = new Point(190, 165),
-            Width = 75,
-            Height = 28,
-            DialogResult = DialogResult.OK
-        };
-
+        int buttonsY = _gbCombo.Bottom + 15;
         _btnCancel = new Button
         {
-            Text = "Отмена",
-            Location = new Point(275, 165),
-            Width = 75,
+            Text = _locService.GetString("HotkeyEditor_Cancel", "Cancel"),
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowOnly,
+            MinimumSize = new Size(75, 28),
             Height = 28,
+            Font = new Font("Segoe UI", 9F),
             DialogResult = DialogResult.Cancel
         };
+        MeasureNow(_btnCancel);
+        _btnCancel.Location = new Point(DialogContentWidth + 15 - _btnCancel.Width, buttonsY);
+
+        _btnSave = new Button
+        {
+            Text = _locService.GetString("HotkeyEditor_OK", "OK"),
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowOnly,
+            MinimumSize = new Size(75, 28),
+            Height = 28,
+            Font = new Font("Segoe UI", 9F),
+            DialogResult = DialogResult.OK
+        };
+        MeasureNow(_btnSave);
+        _btnSave.Location = new Point(_btnCancel.Left - 10 - _btnSave.Width, buttonsY);
+
+        this.ClientSize = new Size(DialogContentWidth + 30, _btnSave.Bottom + 20);
 
         this.Controls.Add(_lblActionDesc);
         this.Controls.Add(_txtActionName);

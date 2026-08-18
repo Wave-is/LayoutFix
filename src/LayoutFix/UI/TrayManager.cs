@@ -17,6 +17,7 @@ public class TrayManager : IDisposable
     private readonly SettingsWindowProvider _settingsWindowProvider;
     private readonly ITranslatorWindowProvider _translatorWindowProvider;
     private readonly HookRecoveryCoordinator _hookRecoveryCoordinator;
+    private readonly ILocalizationService _locService;
     private readonly System.Windows.Forms.Timer _layoutTimer;
     private string _lastLayout = string.Empty;
     private bool _lastUseFlagIcons = true;
@@ -31,7 +32,8 @@ public class TrayManager : IDisposable
         IHotkeyCoordinator hotkeyCoordinator,
         SettingsWindowProvider settingsWindowProvider,
         ITranslatorWindowProvider translatorWindowProvider,
-        HookRecoveryCoordinator hookRecoveryCoordinator)
+        HookRecoveryCoordinator hookRecoveryCoordinator,
+        ILocalizationService locService)
     {
         _settingsService = settingsService;
         _lastUseFlagIcons = _settingsService.Current.UseFlagIcons;
@@ -40,6 +42,7 @@ public class TrayManager : IDisposable
         _settingsWindowProvider = settingsWindowProvider;
         _translatorWindowProvider = translatorWindowProvider;
         _hookRecoveryCoordinator = hookRecoveryCoordinator;
+        _locService = locService;
 
         _notifyIcon = new NotifyIcon
         {
@@ -173,11 +176,13 @@ public class TrayManager : IDisposable
 
         var oldIcon = _notifyIcon.Icon;
         _notifyIcon.Icon = newIcon;
-        _notifyIcon.Text = !hooksOperational
-            ? "LayoutFix — reconnecting input hooks"
+        var tooltip = !hooksOperational
+            ? _locService.GetString("Tray_TooltipReconnecting", "LayoutFix — reconnecting input hooks")
             : isEnabled
-                ? "LayoutFix — automatic correction on"
-                : "LayoutFix — manual correction active";
+                ? _locService.GetString("Tray_TooltipAutoOn", "LayoutFix — automatic correction on")
+                : _locService.GetString("Tray_TooltipManual", "LayoutFix — manual correction active");
+        // NotifyIcon.Text has a hard 63-character limit and throws if exceeded.
+        _notifyIcon.Text = tooltip.Length > 63 ? tooltip.Substring(0, 63) : tooltip;
         oldIcon?.Dispose();
     }
 
@@ -195,8 +200,8 @@ public class TrayManager : IDisposable
         if (_hookStatusMenuItem != null)
         {
             _hookStatusMenuItem.Text = _hookRecoveryCoordinator.IsOperational
-                ? "Input hooks: active"
-                : "Input hooks: reconnecting…";
+                ? _locService.GetString("Tray_HooksActive", "Input hooks: active")
+                : _locService.GetString("Tray_HooksReconnecting", "Input hooks: reconnecting…");
         }
     }
 
@@ -247,7 +252,8 @@ public class TrayManager : IDisposable
         menu.Items.Add(_hookStatusMenuItem);
         menu.Items.Add(new ToolStripSeparator());
 
-        _autoCorrectionMenuItem = new ToolStripMenuItem("Automatic correction")
+        _autoCorrectionMenuItem = new ToolStripMenuItem(
+            _locService.GetString("Tray_AutomaticCorrection", "Automatic correction"))
         {
             CheckOnClick = true,
             Checked = _settingsService.Current.AutoConversionEnabled
@@ -261,14 +267,16 @@ public class TrayManager : IDisposable
             UpdateTrayIcon();
         };
         menu.Items.Add(_autoCorrectionMenuItem);
-        menu.Items.Add("Undo last auto-correction", null, async (s, e) =>
-            await _hotkeyCoordinator.ExecuteActionAsync(LayoutFix.Core.Models.HotkeyAction.Undo));
+        menu.Items.Add(
+            _locService.GetString("Settings_UndoAutoCorrection", "Undo last auto-correction"),
+            null,
+            async (s, e) => await _hotkeyCoordinator.ExecuteActionAsync(LayoutFix.Core.Models.HotkeyAction.Undo));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Translator...", null, (s, e) => OpenTranslator());
-        menu.Items.Add("Settings...", null, (s, e) => ShowSettings());
-        menu.Items.Add("About...", null, (s, e) => ShowSettings()); // Assuming About is a tab in Settings
+        menu.Items.Add(_locService.GetString("Tray_Translator", "Translator..."), null, (s, e) => OpenTranslator());
+        menu.Items.Add(_locService.GetString("Tray_Settings", "Settings..."), null, (s, e) => ShowSettings());
+        menu.Items.Add(_locService.GetString("Tray_About", "About..."), null, (s, e) => ShowSettings()); // Assuming About is a tab in Settings
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Exit", null, (s, e) => Application.Exit());
+        menu.Items.Add(_locService.GetString("Tray_Exit", "Exit"), null, (s, e) => Application.Exit());
 
         return menu;
     }
