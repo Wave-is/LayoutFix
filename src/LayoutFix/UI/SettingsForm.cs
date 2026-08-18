@@ -108,7 +108,7 @@ public class SettingsForm : Form
         _pnlSidebar = new Panel
         {
             Dock = DockStyle.Left,
-            Width = 240,
+            Width = 220,
             BackColor = _sidebarColor,
             Padding = new Padding(0, 20, 0, 0)
         };
@@ -315,7 +315,7 @@ public class SettingsForm : Form
             Height = 50,
             FlatStyle = FlatStyle.Flat,
             TextAlign = ContentAlignment.MiddleLeft,
-            Font = new Font("Segoe UI", 10.5F, FontStyle.Regular),
+            Font = new Font("Segoe UI", 11F, FontStyle.Regular),
             ForeColor = Color.DarkGray,
             Cursor = Cursors.Hand,
             BackColor = Color.Transparent
@@ -331,7 +331,7 @@ public class SettingsForm : Form
                 {
                     b.ForeColor = _bgColor == Color.FromArgb(28, 28, 30) ? Color.DarkGray : Color.DimGray;
                     b.BackColor = Color.Transparent;
-                    b.Font = new Font("Segoe UI", 10.5F, FontStyle.Regular);
+                    b.Font = new Font("Segoe UI", 11F, FontStyle.Regular);
                 }
             }
             
@@ -341,7 +341,7 @@ public class SettingsForm : Form
             targetPanel.BeginInvoke(() => ResetScrollPositions(targetPanel));
 
             btn.ForeColor = Color.White;
-            btn.Font = new Font("Segoe UI", 10.5F, FontStyle.Bold);
+            btn.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
             btn.BackColor = _accentColor;
             _activeTabButton = btn;
         };
@@ -1414,7 +1414,9 @@ public class SettingsForm : Form
         var lblModelCapabilities = new Label
         {
             AutoSize = true,
-            Location = new Point(modelComboX, y + 44),
+            // Sits on the same row as btnDownload (below), not under cmbModel:
+            // it must clear btnDownload's fixed 200px width, not modelComboX.
+            Location = new Point(220, y + 44),
             ForeColor = _textColor
         };
         pnl.Controls.Add(lblModelCapabilities);
