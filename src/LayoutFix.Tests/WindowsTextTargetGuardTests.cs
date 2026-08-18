@@ -196,7 +196,10 @@ public class WindowsTextTargetGuardTests
                 release.Wait();
                 return true;
             });
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        // Comfortably under WindowsTextTargetGuard's 300ms ProbeTimeout, but with
+        // enough margin over a bare 50ms that scheduler/timer jitter on a loaded
+        // CI runner doesn't turn this into a false negative.
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             guard.CanModifyAsync(Context, cancellation.Token));
