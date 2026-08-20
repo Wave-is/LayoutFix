@@ -87,6 +87,10 @@ foreach ($browser in @('edge', 'chrome')) {
                 & $harness "--${browser}-test" $target
                 $exitCode = $LASTEXITCODE
                 if ($exitCode -eq 0) {
+                    # Chromium may keep a profile-scoped utility process alive
+                    # briefly after the verified window closes. Clean only the
+                    # exact LayoutFix temp profiles before leak verification.
+                    Remove-IsolatedBrowserProfiles
                     break
                 }
 
@@ -99,7 +103,7 @@ foreach ($browser in @('edge', 'chrome')) {
                 if ($attempt -eq $maximumAttempts) {
                     throw "$browser $target iteration $iteration/$Runs failed on attempt $attempt/$maximumAttempts with exit code $exitCode.`n$details"
                 }
-                Write-Warning "$browser $target iteration $iteration/$Runs attempt $attempt/$maximumAttempts failed with exit code $exitCode; retrying once with a fresh isolated profile."
+                Write-Warning "$browser $target iteration $iteration/$Runs attempt $attempt/$maximumAttempts failed with exit code $exitCode; retrying with a fresh isolated profile."
             }
         }
     }
