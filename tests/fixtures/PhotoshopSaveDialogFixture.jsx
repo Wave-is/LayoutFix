@@ -11,13 +11,6 @@ app.documents.add(
     NewDocumentMode.RGB,
     DocumentFill.WHITE);
 
-// Defer File > Save until this startup JSX has returned. For an unsaved
-// document Photoshop opens the Save As dialog through this normal user path.
-// Dialogs are suppressed only while the fixture creates its owned document;
-// leaving DialogModes.NO active here prevents the very Save As UI this test
-// needs to exercise.
+// The Windows E2E driver invokes Photoshop's real Ctrl+Shift+S shortcut after
+// this startup script returns. Restore dialogs so that user path is observable.
 app.displayDialogs = DialogModes.ALL;
-app.scheduleTask(
-    'app.runMenuItem(charIDToTypeID("save"));',
-    2000,
-    false);

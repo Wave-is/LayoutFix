@@ -49,6 +49,51 @@ if (-not (Test-Path -LiteralPath $e2eExecutable)) {
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Drawing
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+public static class LayoutFixPhotoshopInput
+{
+    private const byte VkControl = 0x11;
+    private const byte VkShift = 0x10;
+    private const byte VkS = 0x53;
+    private const uint KeyUp = 0x0002;
+    private const int SwRestore = 9;
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindowAsync(IntPtr window, int command);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(
+        byte virtualKey,
+        byte scanCode,
+        uint flags,
+        UIntPtr extraInfo);
+
+    public static bool OpenSaveAs(IntPtr window)
+    {
+        ShowWindowAsync(window, SwRestore);
+        if (!SetForegroundWindow(window))
+        {
+            return false;
+        }
+
+        Thread.Sleep(300);
+        keybd_event(VkControl, 0, 0, UIntPtr.Zero);
+        keybd_event(VkShift, 0, 0, UIntPtr.Zero);
+        keybd_event(VkS, 0, 0, UIntPtr.Zero);
+        keybd_event(VkS, 0, KeyUp, UIntPtr.Zero);
+        keybd_event(VkShift, 0, KeyUp, UIntPtr.Zero);
+        keybd_event(VkControl, 0, KeyUp, UIntPtr.Zero);
+        return true;
+    }
+}
+'@
 
 function Get-ProcessWindows {
     param([Parameter(Mandatory)][int]$ProcessId)
@@ -290,7 +335,17 @@ for ($run = 1; $run -le $Runs; $run++) {
                 "$StartupTimeoutSeconds seconds.`n$diagnostics")
         }
 
-        $deadline = [DateTime]::UtcNow.AddSeconds(30)
+        $mainWindowCurrent = $mainWindow[0].Current
+        if ($mainWindowCurrent.ProcessId -ne $startedProcess.Id -or
+            $mainWindowCurrent.NativeWindowHandle -eq 0) {
+            throw 'Photoshop controlled document identity changed before Save As.'
+        }
+        if (-not [LayoutFixPhotoshopInput]::OpenSaveAs(
+            [IntPtr]$mainWindowCurrent.NativeWindowHandle)) {
+            throw 'Could not bring the controlled Photoshop document to the foreground.'
+        }
+
+        $deadline = [DateTime]::UtcNow.AddSeconds(45)
         $target = @()
         while ([DateTime]::UtcNow -lt $deadline -and -not $startedProcess.HasExited) {
             $target = @(Find-PhotoshopSaveDialog -ProcessId $startedProcess.Id)
@@ -306,7 +361,7 @@ for ($run = 1; $run -le $Runs; $run++) {
                 -ProcessId $startedProcess.Id
             throw (
                 "Photoshop did not expose a verified Save As filename field within " +
-                "30 seconds. screenshot=$screenshotPath`n$diagnostics")
+                "45 seconds. screenshot=$screenshotPath`n$diagnostics")
         }
 
         $dialog = $target[0]
