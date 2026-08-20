@@ -6,4 +6,5 @@ public sealed record TextSelection(
     bool WasSelectedByFallback,
     long? KeyboardInputGeneration = null,
     long? MouseInputGeneration = null,
-    string? DirectAdapterId = null);
+    string? DirectAdapterId = null,
+    long? DiagnosticCaptureId = null);

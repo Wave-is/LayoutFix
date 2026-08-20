@@ -3246,8 +3246,9 @@ internal static class Program
                         localization.GetString("Settings_AutoConv", "Enable automatic correction while typing"),
                         localization.GetString("Settings_AutoStart", "Start with Windows"),
                         localization.GetString("Settings_Sound", "Enable sound notifications"),
+                        localization.GetString("Settings_Notifications", "Show diagnostic popup messages (LF-... codes)"),
                         localization.GetString("Settings_Flags", "Use country flags in tray"),
-                        localization.GetString("Settings_Logging", "Diagnostic logging")
+                        localization.GetString("Settings_Logging", "Diagnostic logs for testing (include application name)")
                     };
                     foreach (var expectedLabel in expectedToggleLabels)
                     {
@@ -5871,7 +5872,7 @@ internal static class Program
             $"LayoutFix.NotificationE2E.{Guid.NewGuid():N}");
         Directory.CreateDirectory(testDirectory);
         var settings = new SettingsService(Path.Combine(testDirectory, "settings.json"));
-        settings.Current.NotificationsEnabled = true;
+        settings.Current.NotificationsEnabled = false;
         settings.Save(settings.Current);
         using var popup = new LayoutFix.Services.PopupService(settings);
         using var form = new Form
@@ -5890,13 +5891,25 @@ internal static class Program
             form.Activate();
             editor.Focus();
             await Task.Delay(200);
+            var formCountBeforeDisabledPopup = Application.OpenForms.Count;
+            popup.ShowStatus("This diagnostic notification must stay hidden");
+            await Task.Delay(150);
+            var disabledPopupStayedHidden =
+                Application.OpenForms.Count == formCountBeforeDisabledPopup;
+            settings.Current.NotificationsEnabled = true;
+            settings.Save(settings.Current);
             var hadFocusBeforePopup = form.ContainsFocus && editor.Focused;
             popup.ShowStatus("Safe refusal notification");
             await Task.Delay(250);
             var keptFocusAfterPopup = form.ContainsFocus && editor.Focused;
             Console.WriteLine(
-                $"notification-focus:before={hadFocusBeforePopup};after={keptFocusAfterPopup};active={Form.ActiveForm?.Text}");
-            result = !hadFocusBeforePopup ? 62 : keptFocusAfterPopup ? 0 : 61;
+                $"notification-focus:hidden={disabledPopupStayedHidden};before={hadFocusBeforePopup};" +
+                $"after={keptFocusAfterPopup};active={Form.ActiveForm?.Text}");
+            result = !disabledPopupStayedHidden
+                ? 63
+                : !hadFocusBeforePopup
+                    ? 62
+                    : keptFocusAfterPopup ? 0 : 61;
             form.Close();
         };
 

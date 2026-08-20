@@ -28,6 +28,33 @@ public class TextTransactionServiceTests
     }
 
     [Fact]
+    public async Task EnabledSupportDiagnostics_RecordsTargetAndExactCaptureReasonWithoutUserText()
+    {
+        var clipboard = new FakeClipboardService("SECRET USER CLIPBOARD TEXT");
+        var logger = new RecordingLogger();
+        var settings = new InMemorySettingsService
+        {
+            Current = new AppSettings { LoggingEnabled = true }
+        };
+        var service = new TextTransactionService(
+            new FakeInputInjector(clipboard),
+            clipboard,
+            new FakeActiveWindowProvider(),
+            logger,
+            new DenyTextTargetGuard(),
+            settingsService: settings);
+
+        var selection = await service.CaptureAsync(allowPreviousWordFallback: true);
+
+        Assert.Null(selection);
+        var log = string.Join(Environment.NewLine, logger.Messages);
+        Assert.Contains("SupportDiagnostic: CaptureId=1", log);
+        Assert.Contains("TargetProcess=test-host", log);
+        Assert.Contains("Reason=target-safety-check-failed", log);
+        Assert.DoesNotContain("SECRET USER CLIPBOARD TEXT", log, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task DirectAdapter_CapturesAndReplacesWithoutGenericClipboardPath()
     {
         var clipboard = new FakeClipboardService("user clipboard payload");
@@ -569,6 +596,22 @@ public class TextTransactionServiceTests
         public void LogInfo(string message) { }
         public void LogWarning(string message) { }
         public void LogError(string message, Exception? ex = null) { }
+    }
+
+    private sealed class RecordingLogger : ILoggerService
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<string> _messages = new();
+        public IReadOnlyCollection<string> Messages => _messages.ToArray();
+        public void LogInfo(string message) => _messages.Enqueue(message);
+        public void LogWarning(string message) => _messages.Enqueue(message);
+        public void LogError(string message, Exception? ex = null) => _messages.Enqueue(message);
+    }
+
+    private sealed class InMemorySettingsService : ISettingsService
+    {
+        public AppSettings Current { get; set; } = new();
+        public AppSettings Load() => Current;
+        public void Save(AppSettings settings) => Current = settings;
     }
 
     private sealed class DenyTextTargetGuard : ITextTargetGuard

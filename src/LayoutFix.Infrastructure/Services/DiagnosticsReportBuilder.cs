@@ -63,6 +63,7 @@ public static class DiagnosticsReportBuilder
         Append(report, "OfflineModel", KnownOfflineModel(settings.OfflineModelType));
         Append(report, "OnlineTranslationEnabled", settings.OnlineTranslationEnabled.ToString(CultureInfo.InvariantCulture));
         Append(report, "TranslationHistoryEnabled", settings.TranslationHistoryEnabled.ToString(CultureInfo.InvariantCulture));
+        Append(report, "DiagnosticNotificationsEnabled", settings.NotificationsEnabled.ToString(CultureInfo.InvariantCulture));
         Append(report, "LoggingEnabled", settings.LoggingEnabled.ToString(CultureInfo.InvariantCulture));
         return report.ToString();
     }

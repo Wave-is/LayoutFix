@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using LayoutFix.Core.Interfaces;
 using LayoutFix.Core.Models;
@@ -17,6 +18,8 @@ public sealed class TextTransactionService : ITextTransactionService
     private readonly IKeyboardHook? _keyboardHook;
     private readonly IMouseHook? _mouseHook;
     private readonly IDirectTextAdapter? _directTextAdapter;
+    private readonly ISettingsService? _settingsService;
+    private long _nextDiagnosticCaptureId;
 
     public TextTransactionService(
         IInputInjector input,
@@ -26,7 +29,8 @@ public sealed class TextTransactionService : ITextTransactionService
         ITextTargetGuard? targetGuard = null,
         IKeyboardHook? keyboardHook = null,
         IMouseHook? mouseHook = null,
-        IDirectTextAdapter? directTextAdapter = null)
+        IDirectTextAdapter? directTextAdapter = null,
+        ISettingsService? settingsService = null)
     {
         _input = input;
         _clipboard = clipboard;
@@ -36,20 +40,27 @@ public sealed class TextTransactionService : ITextTransactionService
         _keyboardHook = keyboardHook;
         _mouseHook = mouseHook;
         _directTextAdapter = directTextAdapter;
+        _settingsService = settingsService;
     }
 
     public async Task<TextSelection?> CaptureAsync(
         bool allowPreviousWordFallback,
         CancellationToken cancellationToken = default)
     {
+        var captureId = Interlocked.Increment(ref _nextDiagnosticCaptureId);
         var window = _activeWindow.CaptureActiveWindow();
         if (!window.IsValid)
+        {
+            LogSupportDiagnostic(captureId, "capture", "rejected", "active-window-unavailable");
             return null;
+        }
+        LogCaptureTarget(captureId, window, allowPreviousWordFallback);
         var captureInputGeneration = CaptureInputGeneration();
         if (_targetGuard != null &&
             !await _targetGuard.CanModifyAsync(window, cancellationToken))
         {
             _logger.LogWarning("Text capture rejected because the focused control is secure or cannot be verified.");
+            LogSupportDiagnostic(captureId, "capture", "rejected", "target-safety-check-failed");
             return null;
         }
 
@@ -57,9 +68,16 @@ public sealed class TextTransactionService : ITextTransactionService
         try
         {
             await _input.WaitForModifiersReleaseAsync();
-            if (InputChanged(captureInputGeneration) ||
-                !_activeWindow.IsSameActiveWindow(window))
+            if (InputChanged(captureInputGeneration))
+            {
+                LogSupportDiagnostic(captureId, "capture", "rejected", "input-changed-after-modifier-release");
                 return null;
+            }
+            if (!_activeWindow.IsSameActiveWindow(window))
+            {
+                LogSupportDiagnostic(captureId, "capture", "rejected", "focus-changed-after-modifier-release");
+                return null;
+            }
 
             if (_directTextAdapter != null)
             {
@@ -69,20 +87,36 @@ public sealed class TextTransactionService : ITextTransactionService
                 if (directCapture.IsApplicable)
                 {
                     if (string.IsNullOrEmpty(directCapture.Text) ||
-                        string.IsNullOrEmpty(directCapture.AdapterId) ||
-                        InputChanged(captureInputGeneration) ||
-                        !_activeWindow.IsSameActiveWindow(window))
+                        string.IsNullOrEmpty(directCapture.AdapterId))
                     {
+                        LogSupportDiagnostic(captureId, "capture", "rejected", "direct-adapter-selection-unverified");
+                        return null;
+                    }
+                    if (InputChanged(captureInputGeneration))
+                    {
+                        LogSupportDiagnostic(captureId, "capture", "rejected", "input-changed-after-direct-capture");
+                        return null;
+                    }
+                    if (!_activeWindow.IsSameActiveWindow(window))
+                    {
+                        LogSupportDiagnostic(captureId, "capture", "rejected", "focus-changed-after-direct-capture");
                         return null;
                     }
 
+                    LogSupportDiagnostic(
+                        captureId,
+                        "capture",
+                        "accepted",
+                        "direct-adapter",
+                        $"Adapter={DiagnosticValue(directCapture.AdapterId)}; Length={directCapture.Text.Length}");
                     return new TextSelection(
                         directCapture.Text,
                         window,
                         WasSelectedByFallback: false,
                         captureInputGeneration.Keyboard,
                         captureInputGeneration.Mouse,
-                        directCapture.AdapterId);
+                        directCapture.AdapterId,
+                        captureId);
                 }
             }
 
@@ -97,7 +131,10 @@ public sealed class TextTransactionService : ITextTransactionService
                 {
                     if (InputChanged(captureInputGeneration) ||
                         !_activeWindow.IsSameActiveWindow(window))
+                    {
+                        LogSupportDiagnostic(captureId, "capture", "rejected", "context-changed-before-fallback-selection");
                         return null;
+                    }
 
                     await _input.SelectWordLeftAsync();
                     fallbackSelectionMade = true;
@@ -121,19 +158,34 @@ public sealed class TextTransactionService : ITextTransactionService
                         captureInputGeneration,
                         cancellationToken);
                 }
+                LogSupportDiagnostic(captureId, "capture", "rejected", "clipboard-copy-returned-no-text");
                 return null;
             }
 
-            if (InputChanged(captureInputGeneration) ||
-                !_activeWindow.IsSameActiveWindow(window))
+            if (InputChanged(captureInputGeneration))
+            {
+                LogSupportDiagnostic(captureId, "capture", "rejected", "input-changed-after-copy");
                 return null;
+            }
+            if (!_activeWindow.IsSameActiveWindow(window))
+            {
+                LogSupportDiagnostic(captureId, "capture", "rejected", "focus-changed-after-copy");
+                return null;
+            }
 
+            LogSupportDiagnostic(
+                captureId,
+                "capture",
+                "accepted",
+                fallbackSelectionMade ? "previous-word-fallback" : "explicit-selection",
+                $"Length={selectedText.Length}");
             return new TextSelection(
                 selectedText,
                 window,
                 fallbackSelectionMade,
                 captureInputGeneration.Keyboard,
-                captureInputGeneration.Mouse);
+                captureInputGeneration.Mouse,
+                DiagnosticCaptureId: captureId);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -149,6 +201,12 @@ public sealed class TextTransactionService : ITextTransactionService
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError("Text capture transaction failed", ex);
+            LogSupportDiagnostic(
+                captureId,
+                "capture",
+                "failed",
+                "transaction-exception",
+                $"ExceptionType={DiagnosticValue(ex.GetType().FullName)}; HResult=0x{ex.HResult:X8}");
             if (fallbackSelectionMade)
             {
                 await CollapseFallbackSelectionAsync(
@@ -166,33 +224,72 @@ public sealed class TextTransactionService : ITextTransactionService
         CancellationToken cancellationToken = default)
     {
         var selectionInputGeneration = GetInputGeneration(selection);
-        if (string.IsNullOrEmpty(replacement) ||
-            InputChanged(selectionInputGeneration) ||
-            !_activeWindow.IsSameActiveWindow(selection.Window))
+        var captureId = selection.DiagnosticCaptureId ??
+            Interlocked.Increment(ref _nextDiagnosticCaptureId);
+        if (string.IsNullOrEmpty(replacement))
+        {
+            LogSupportDiagnostic(captureId, "replacement", "rejected", "replacement-empty");
             return false;
+        }
+        if (InputChanged(selectionInputGeneration))
+        {
+            LogSupportDiagnostic(captureId, "replacement", "rejected", "input-changed-before-replacement");
+            return false;
+        }
+        if (!_activeWindow.IsSameActiveWindow(selection.Window))
+        {
+            LogSupportDiagnostic(captureId, "replacement", "rejected", "focus-changed-before-replacement");
+            return false;
+        }
         if (_targetGuard != null &&
             !await _targetGuard.CanModifyAsync(selection.Window, cancellationToken))
+        {
+            LogSupportDiagnostic(captureId, "replacement", "rejected", "target-safety-recheck-failed");
             return false;
-        if (InputChanged(selectionInputGeneration) ||
-            !_activeWindow.IsSameActiveWindow(selection.Window))
+        }
+        if (InputChanged(selectionInputGeneration))
+        {
+            LogSupportDiagnostic(captureId, "replacement", "rejected", "input-changed-after-safety-recheck");
             return false;
+        }
+        if (!_activeWindow.IsSameActiveWindow(selection.Window))
+        {
+            LogSupportDiagnostic(captureId, "replacement", "rejected", "focus-changed-after-safety-recheck");
+            return false;
+        }
 
         if (selection.DirectAdapterId != null)
         {
             if (_directTextAdapter == null)
+            {
+                LogSupportDiagnostic(captureId, "replacement", "failed", "direct-adapter-unavailable");
                 return false;
+            }
             try
             {
-                return await _directTextAdapter.TryReplaceAsync(
+                var directResult = await _directTextAdapter.TryReplaceAsync(
                     selection.DirectAdapterId,
                     selection.Window,
                     selection.Text,
                     replacement,
                     cancellationToken);
+                LogSupportDiagnostic(
+                    captureId,
+                    "replacement",
+                    directResult ? "accepted" : "rejected",
+                    directResult ? "direct-adapter" : "direct-adapter-refused",
+                    $"Adapter={DiagnosticValue(selection.DirectAdapterId)}; SourceLength={selection.Text.Length}; ResultLength={replacement.Length}");
+                return directResult;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogError("Direct text replacement transaction failed", ex);
+                LogSupportDiagnostic(
+                    captureId,
+                    "replacement",
+                    "failed",
+                    "direct-adapter-exception",
+                    $"ExceptionType={DiagnosticValue(ex.GetType().FullName)}; HResult=0x{ex.HResult:X8}");
                 return false;
             }
         }
@@ -220,17 +317,35 @@ public sealed class TextTransactionService : ITextTransactionService
                 InputChanged(selectionInputGeneration) ||
                 !_activeWindow.IsSameActiveWindow(selection.Window))
             {
+                var reason = !string.Equals(currentSelection, selection.Text, StringComparison.Ordinal)
+                    ? "selection-content-changed"
+                    : InputChanged(selectionInputGeneration)
+                        ? "input-changed-during-verification"
+                        : "focus-changed-during-verification";
+                LogSupportDiagnostic(captureId, "replacement", "rejected", reason);
                 return false;
             }
 
             replacementInputGeneration = CaptureInputGeneration();
             await _input.SendTextAsync(replacement);
+            LogSupportDiagnostic(
+                captureId,
+                "replacement",
+                "accepted",
+                "input-injected",
+                $"SourceLength={selection.Text.Length}; ResultLength={replacement.Length}");
             return true;
         }
         catch (InputInjectionException ex)
             when (ex.Operation == InputInjectionOperation.Text && ex.AffectedUnitCount > 0)
         {
             _logger.LogError("Text replacement was only partially injected", ex);
+            LogSupportDiagnostic(
+                captureId,
+                "replacement",
+                "failed",
+                "partial-input-injection",
+                $"RequestedUnits={ex.RequestedUnitCount}; AffectedUnits={ex.AffectedUnitCount}");
             await TryRollbackPartialReplacementAsync(
                 selection,
                 replacement,
@@ -241,6 +356,12 @@ public sealed class TextTransactionService : ITextTransactionService
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError("Text replacement transaction failed", ex);
+            LogSupportDiagnostic(
+                captureId,
+                "replacement",
+                "failed",
+                "transaction-exception",
+                $"ExceptionType={DiagnosticValue(ex.GetType().FullName)}; HResult=0x{ex.HResult:X8}");
             return false;
         }
     }
@@ -372,6 +493,72 @@ public sealed class TextTransactionService : ITextTransactionService
          _keyboardHook!.InputGeneration != expectedGeneration.Keyboard.Value) ||
         (expectedGeneration.Mouse.HasValue &&
          _mouseHook!.InputGeneration != expectedGeneration.Mouse.Value);
+
+    private void LogCaptureTarget(
+        long captureId,
+        ActiveWindowContext window,
+        bool allowPreviousWordFallback)
+    {
+        if (_settingsService?.Current.LoggingEnabled != true)
+            return;
+
+        var processName = "unavailable";
+        var processVersion = "unavailable";
+        try
+        {
+            using var process = Process.GetProcessById(checked((int)window.ProcessId));
+            processName = DiagnosticValue(process.ProcessName);
+            try
+            {
+                processVersion = DiagnosticValue(process.MainModule?.FileVersionInfo.FileVersion);
+            }
+            catch
+            {
+                processVersion = "unavailable";
+            }
+        }
+        catch
+        {
+            var activeProcess = _activeWindow.GetActiveProcessName();
+            if (!string.IsNullOrWhiteSpace(activeProcess))
+                processName = DiagnosticValue(activeProcess);
+        }
+
+        _logger.LogInfo(
+            $"SupportDiagnostic: CaptureId={captureId}; Phase=capture; Outcome=started; " +
+            $"TargetProcess={processName}; TargetVersion={processVersion}; " +
+            $"PreviousWordFallback={allowPreviousWordFallback}.");
+    }
+
+    private void LogSupportDiagnostic(
+        long captureId,
+        string phase,
+        string outcome,
+        string reason,
+        string? details = null)
+    {
+        if (_settingsService?.Current.LoggingEnabled != true)
+            return;
+
+        var suffix = string.IsNullOrWhiteSpace(details) ? string.Empty : $"; {details}";
+        _logger.LogInfo(
+            $"SupportDiagnostic: CaptureId={captureId}; Phase={phase}; " +
+            $"Outcome={outcome}; Reason={reason}{suffix}.");
+    }
+
+    private static string DiagnosticValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "unavailable";
+
+        return new string(value
+            .Take(128)
+            .Select(character =>
+                char.IsLetterOrDigit(character) || character is ' ' or '.' or '-' or '_' or '(' or ')'
+                    ? character
+                    : '_')
+            .ToArray());
+    }
 
     private readonly record struct InputGenerationSnapshot(long? Keyboard, long? Mouse);
 }

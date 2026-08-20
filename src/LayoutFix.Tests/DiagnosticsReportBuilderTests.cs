@@ -24,7 +24,9 @@ public class DiagnosticsReportBuilderTests
             UserExceptions = ["word"],
             UserAutocorrect = new Dictionary<string, string> { ["from"] = "to" },
             UseOfflineTranslation = true,
-            OfflineModelType = "pro"
+            OfflineModelType = "pro",
+            NotificationsEnabled = false,
+            LoggingEnabled = true
         };
 
         var report = DiagnosticsReportBuilder.Build(settings, "1.2.3");
@@ -52,6 +54,8 @@ public class DiagnosticsReportBuilderTests
         Assert.Contains("UserReplacements=1", report);
         Assert.Contains("OfflineTranslationEnabled=True", report);
         Assert.Contains("OfflineModel=pro", report);
+        Assert.Contains("DiagnosticNotificationsEnabled=False", report);
+        Assert.Contains("LoggingEnabled=True", report);
     }
 
     [Fact]

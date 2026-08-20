@@ -86,6 +86,31 @@ public class WindowsTextTargetGuardTests
         Assert.Equal(0, automationCalls);
     }
 
+    [Fact]
+    public async Task EnabledSupportDiagnostics_RecordsProbePathAndReason()
+    {
+        var logger = new RecordingLogger();
+        var settings = new InMemorySettingsService
+        {
+            Current = new AppSettings { LoggingEnabled = true }
+        };
+        using var guard = new WindowsTextTargetGuard(
+            new FakeActiveWindowProvider(),
+            logger,
+            _ => true,
+            _ => false,
+            _ => TargetInputAccess.Allowed,
+            settings);
+
+        Assert.False(await guard.CanModifyAsync(Context));
+
+        var log = string.Join(Environment.NewLine, logger.Infos);
+        Assert.Contains("Phase=target-probe", log);
+        Assert.Contains("Reason=native-edit-not-writable", log);
+        Assert.Contains("Probe=native", log);
+        Assert.DoesNotContain(Context.ProcessId.ToString(), log, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData((int)TargetInputAccess.HigherIntegrity, "higher integrity")]
     [InlineData((int)TargetInputAccess.Unavailable, "integrity is unavailable")]
@@ -267,10 +292,18 @@ public class WindowsTextTargetGuardTests
 
     private sealed class RecordingLogger : ILoggerService
     {
+        public System.Collections.Concurrent.ConcurrentQueue<string> Infos { get; } = new();
         public System.Collections.Concurrent.ConcurrentQueue<string> Warnings { get; } = new();
         public System.Collections.Concurrent.ConcurrentQueue<string> Errors { get; } = new();
-        public void LogInfo(string message) { }
+        public void LogInfo(string message) => Infos.Enqueue(message);
         public void LogWarning(string message) => Warnings.Enqueue(message);
         public void LogError(string message, Exception? ex = null) => Errors.Enqueue(message);
+    }
+
+    private sealed class InMemorySettingsService : ISettingsService
+    {
+        public AppSettings Current { get; set; } = new();
+        public AppSettings Load() => Current;
+        public void Save(AppSettings settings) => Current = settings;
     }
 }

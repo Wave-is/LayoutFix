@@ -24,12 +24,16 @@ public sealed class SettingsPersistenceTests : IDisposable
 
         service.Current.UiLanguage = "ru";
         service.Current.AutoConversionEnabled = true;
+        service.Current.NotificationsEnabled = false;
+        service.Current.LoggingEnabled = true;
         service.Save(service.Current);
 
         var reloaded = new SettingsService(settingsPath);
 
         Assert.Equal("ru", reloaded.Current.UiLanguage);
         Assert.True(reloaded.Current.AutoConversionEnabled);
+        Assert.False(reloaded.Current.NotificationsEnabled);
+        Assert.True(reloaded.Current.LoggingEnabled);
         Assert.Equal(AppSettings.CurrentVersion, reloaded.Current.Version);
         Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(settingsPath)!, "*.tmp"));
     }

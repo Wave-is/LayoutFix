@@ -70,14 +70,28 @@ public class TranslationCoordinatorTests
         var online = new ControllableTranslationService();
         var transaction = new RecordingTextTransactionService();
         var sound = new RecordingSoundService();
-        using var coordinator = CreateCoordinator(online, transaction, sound);
+        var logger = new RecordingLogger();
+        var popup = new RecordingPopupService();
+        using var coordinator = CreateCoordinator(
+            online,
+            transaction,
+            sound,
+            logger: logger,
+            popup: popup);
 
-        await coordinator.QueueTranslationAsync(Selection, "uk");
+        var privateSelection = Selection with { Text = "SECRET USER TRANSLATION TEXT" };
+        await coordinator.QueueTranslationAsync(privateSelection, "uk");
         await online.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
         online.Fail(new HttpRequestException("provider unavailable"));
         await sound.ErrorPlayed.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var notification = await popup.Notified.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         Assert.False(transaction.Replaced.Task.IsCompleted);
+        Assert.Contains("LF-TR-002", notification);
+        var log = string.Join(Environment.NewLine, logger.Messages);
+        Assert.Contains("Reason: online-provider-network-failure", log);
+        Assert.Contains("TranslationRequestId", log);
+        Assert.DoesNotContain(privateSelection.Text, log, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -271,13 +285,16 @@ public class TranslationCoordinatorTests
         RecordingTextTransactionService transaction,
         RecordingSoundService? sound = null,
         FakeSettingsService? settings = null,
-        IOfflineTranslationService? offline = null) => new(
+        IOfflineTranslationService? offline = null,
+        ILoggerService? logger = null,
+        IPopupService? popup = null) => new(
             online,
             offline ?? new UnavailableOfflineTranslationService(),
             transaction,
             settings ?? new FakeSettingsService(),
             sound ?? new RecordingSoundService(),
-            new NullLogger());
+            logger ?? new NullLogger(),
+            popup);
 
     private sealed class ControllableTranslationService : ITranslationService
     {
@@ -443,5 +460,22 @@ public class TranslationCoordinatorTests
         public void LogInfo(string message) { }
         public void LogWarning(string message) { }
         public void LogError(string message, Exception? ex = null) { }
+    }
+
+    private sealed class RecordingLogger : ILoggerService
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<string> _messages = new();
+        public IReadOnlyCollection<string> Messages => _messages.ToArray();
+        public void LogInfo(string message) => _messages.Enqueue(message);
+        public void LogWarning(string message) => _messages.Enqueue(message);
+        public void LogError(string message, Exception? ex = null) => _messages.Enqueue(message);
+    }
+
+    private sealed class RecordingPopupService : IPopupService
+    {
+        public TaskCompletionSource<string> Notified { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public void ShowTranslationPopup(string text) { }
+        public void ShowStatus(string message, bool isError = false) => Notified.TrySetResult(message);
     }
 }

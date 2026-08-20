@@ -410,8 +410,9 @@ public class SettingsForm : Form
         pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_AutoConv", "Enable automatic correction while typing"), _currentSettings.AutoConversionEnabled, v => { _currentSettings.AutoConversionEnabled = v; SaveSettings(); }, y)); y += 50;
         pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_AutoStart", "Start with Windows"), _currentSettings.AutoStart, v => { _currentSettings.AutoStart = v; SaveSettings(); }, y)); y += 50;
         pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_Sound", "Enable sound notifications"), _currentSettings.SoundEnabled, v => { _currentSettings.SoundEnabled = v; SaveSettings(); }, y)); y += 50;
+        pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_Notifications", "Show diagnostic popup messages (LF-... codes)"), _currentSettings.NotificationsEnabled, v => { _currentSettings.NotificationsEnabled = v; SaveSettings(); }, y)); y += 50;
         pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_Flags", "Use country flags in tray"), _currentSettings.UseFlagIcons, v => { _currentSettings.UseFlagIcons = v; SaveSettings(); }, y)); y += 50;
-        pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_Logging", "Diagnostic logging"), _currentSettings.LoggingEnabled, v => { _currentSettings.LoggingEnabled = v; SaveSettings(); }, y)); y += 50;
+        pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_Logging", "Diagnostic logs for testing (include application name)"), _currentSettings.LoggingEnabled, v => { _currentSettings.LoggingEnabled = v; SaveSettings(); }, y)); y += 50;
 
         var lblTheme = new Label { Text = _locService.GetString("Settings_Theme", "Color theme"), ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
         MeasureNow(lblTheme);
