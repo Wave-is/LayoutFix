@@ -211,6 +211,8 @@ public class WindowsTextTargetGuardTests
     public async Task CancellationDoesNotReleaseGateWhileProviderIsStillHung()
     {
         using var release = new ManualResetEventSlim(false);
+        var probeStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         var probeCalls = 0;
         using var guard = new WindowsTextTargetGuard(
             new FakeActiveWindowProvider(),
@@ -218,16 +220,17 @@ public class WindowsTextTargetGuardTests
             _ =>
             {
                 Interlocked.Increment(ref probeCalls);
+                probeStarted.TrySetResult();
                 release.Wait();
                 return true;
             });
-        // Comfortably under WindowsTextTargetGuard's 300ms ProbeTimeout, but with
-        // enough margin over a bare 50ms that scheduler/timer jitter on a loaded
-        // CI runner doesn't turn this into a false negative.
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+        using var cancellation = new CancellationTokenSource();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            guard.CanModifyAsync(Context, cancellation.Token));
+        var pendingProbe = guard.CanModifyAsync(Context, cancellation.Token);
+        await probeStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pendingProbe);
         Assert.False(await guard.CanModifyAsync(Context));
         Assert.Equal(1, probeCalls);
         release.Set();
