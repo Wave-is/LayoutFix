@@ -426,7 +426,7 @@ public class AutoConversionServiceTests
         hook.Type(("h", "р"), ("e", "у"), ("l", "д"), ("l", "д"), ("o", "щ"));
         hook.Press("space", " ");
         hook.Press("x", "ч");
-        await Task.Delay(150);
+        await Task.Delay(350);
 
         Assert.Equal(0, input.BackspaceCount);
         Assert.Empty(input.SentText);
@@ -574,7 +574,7 @@ public class AutoConversionServiceTests
 
         hook.Type(("h", "р"), ("e", "у"), ("l", "д"));
         hook.Press("space", " ");
-        await Task.Delay(100);
+        await input.CorrectionCompleted.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         Assert.Equal(1, dictionary.CallCount);
         Assert.True(input.BackspaceCount > 0);
@@ -838,17 +838,18 @@ public class AutoConversionServiceTests
         var input = new RecordingInputInjector();
         var settings = CreateSettings();
         settings.Current.UserAutocorrect["teh"] = "the";
+        var guard = new AllowThenDenyTextTargetGuard();
         using var service = CreateService(
             hook,
             input,
             new FakeActiveWindowProvider(),
             new FakeDictionaryAnalyzer(false),
             settings,
-            new AllowThenDenyTextTargetGuard());
+            guard);
 
         hook.Type(("t", "t"), ("e", "e"), ("h", "h"));
         hook.Press("space", " ");
-        await Task.Delay(150);
+        await guard.SecondCheckStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         Assert.Equal(0, input.BackspaceCount);
         Assert.Empty(input.SentText);
@@ -1434,11 +1435,18 @@ public class AutoConversionServiceTests
     private sealed class AllowThenDenyTextTargetGuard : ITextTargetGuard
     {
         private int _callCount;
+        public TaskCompletionSource SecondCheckStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task<bool> CanModifyAsync(
             ActiveWindowContext context,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(Interlocked.Increment(ref _callCount) == 1);
+            CancellationToken cancellationToken = default)
+        {
+            var allowed = Interlocked.Increment(ref _callCount) == 1;
+            if (!allowed)
+                SecondCheckStarted.TrySetResult();
+            return Task.FromResult(allowed);
+        }
     }
 
     private sealed class AllowThenBlockTextTargetGuard : ITextTargetGuard

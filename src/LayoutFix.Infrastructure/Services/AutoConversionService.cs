@@ -13,6 +13,7 @@ public sealed class AutoConversionService : IDisposable
     private const int MinimumAutomaticLayoutWordLength = 3;
     private const int ModifierReleaseTimeoutMilliseconds = 250;
     private const int LayoutActivationTimeoutMilliseconds = 250;
+    private const int TargetInputSettleDelayMilliseconds = 250;
     private readonly IKeyboardHook _keyboardHook;
     private readonly IMouseHook _mouseHook;
     private readonly ISettingsService _settingsService;
@@ -286,7 +287,12 @@ public sealed class AutoConversionService : IDisposable
 
         cancellationToken.ThrowIfCancellationRequested();
         _logger.LogInfo($"Automatic conversion prepared. Source length: {word.Length}, result length: {replacement.Length}");
-        await Task.Delay(35, cancellationToken);
+        // The low-level hook observes a SendInput/physical-key batch before the
+        // target UI thread has necessarily processed the corresponding window
+        // messages. Let that tail reach the focused control before Backspace,
+        // layout activation, or a failure callback can change focus. The
+        // generation and focus proofs below still fail closed on newer input.
+        await Task.Delay(TargetInputSettleDelayMilliseconds, cancellationToken);
 
         try
         {
