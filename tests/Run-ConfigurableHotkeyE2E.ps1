@@ -31,6 +31,7 @@ if (-not (Test-Path $harness)) {
 }
 
 $cases = @(
+    @{ Hotkey = 'ScrollLock'; VirtualKey = 0x91 },
     @{ Hotkey = 'Ctrl+/'; VirtualKey = 0xBF },
     @{ Hotkey = 'Ctrl+NumPad0'; VirtualKey = 0x60 },
     @{ Hotkey = 'Ctrl+0'; VirtualKey = 0x30 }

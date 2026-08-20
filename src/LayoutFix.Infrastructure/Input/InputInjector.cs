@@ -104,38 +104,64 @@ public class InputInjector : IInputInjector
     {
         if (string.IsNullOrEmpty(text)) return;
 
-        var inputs = new Win32.INPUT[text.Length * 2];
-        int idx = 0;
-
-        foreach (char c in text)
+        var textUnits = CreateTextInjectionUnits(text);
+        var inputs = new Win32.INPUT[textUnits.Count * 2];
+        var inputIndex = 0;
+        foreach (var unit in textUnits)
         {
             var down = new Win32.INPUT { type = Win32.INPUT_KEYBOARD };
             down.u.ki = new Win32.KEYBDINPUT
             {
                 wVk = 0,
-                wScan = c,
+                wScan = unit.Value,
                 dwFlags = Win32.KEYEVENTF_UNICODE,
                 dwExtraInfo = KeyboardHook.InjectedExtraInfo
             };
-            inputs[idx++] = down;
+            inputs[inputIndex++] = down;
 
             var up = new Win32.INPUT { type = Win32.INPUT_KEYBOARD };
             up.u.ki = new Win32.KEYBDINPUT
             {
                 wVk = 0,
-                wScan = c,
+                wScan = unit.Value,
                 dwFlags = Win32.KEYEVENTF_UNICODE | Win32.KEYEVENTF_KEYUP,
                 dwExtraInfo = KeyboardHook.InjectedExtraInfo
             };
-            inputs[idx++] = up;
+            inputs[inputIndex++] = up;
         }
 
         SendInputs(
             inputs,
             InputInjectionOperation.Text,
             requestedUnitCount: text.Length,
-            affectedUnitCount: sent => Math.Min(text.Length, (sent + 1) / 2));
+            affectedUnitCount: sent => textUnits
+                .Take(Math.Min(textUnits.Count, (sent + 1) / 2))
+                .Sum(unit => unit.SourceUtf16Length));
         await Task.Delay(50);
+    }
+
+    private static List<TextInjectionUnit> CreateTextInjectionUnits(string text)
+    {
+        var units = new List<TextInjectionUnit>(text.Length);
+        for (var index = 0; index < text.Length; index++)
+        {
+            var value = text[index];
+            if (value == '\r')
+            {
+                var isCrLf = index + 1 < text.Length && text[index + 1] == '\n';
+                units.Add(new TextInjectionUnit('\r', isCrLf ? 2 : 1));
+                if (isCrLf)
+                    index++;
+                continue;
+            }
+
+            // KEYEVENTF_UNICODE sends control characters as keyboard input. A
+            // standalone LF and the CR+LF pair must therefore become one Enter;
+            // sending both halves of CRLF creates two visible lines in Win32 Edit.
+            units.Add(new TextInjectionUnit(value == '\n' ? '\r' : value, 1));
+        }
+
+        return units;
     }
 
     public async Task SelectWordLeftAsync()
@@ -269,4 +295,6 @@ public class InputInjector : IInputInjector
             _ => 0
         };
     }
+
+    private readonly record struct TextInjectionUnit(char Value, int SourceUtf16Length);
 }

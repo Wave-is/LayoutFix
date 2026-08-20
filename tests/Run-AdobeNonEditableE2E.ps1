@@ -18,25 +18,36 @@ $e2eProject = Join-Path $workspace 'tests\LayoutFix.WindowsE2E\LayoutFix.Windows
 $e2eExecutable = Join-Path $workspace 'tests\LayoutFix.WindowsE2E\bin\Release\net8.0-windows\win-x64\LayoutFix.WindowsE2E.exe'
 $catalog = @{
     Photoshop = @{
-        Path = 'C:\Program Files\Adobe\Adobe Photoshop 2025\Photoshop.exe'
+        Paths = @(
+            'C:\Program Files\Adobe\Adobe Photoshop 2026\Photoshop.exe'
+            'C:\Program Files\Adobe\Adobe Photoshop 2025\Photoshop.exe'
+        )
         ProcessName = 'Photoshop'
         WindowName = 'Adobe Photoshop'
     }
     Premiere = @{
-        Path = 'C:\Program Files\Adobe\Adobe Premiere Pro 2025\Adobe Premiere Pro.exe'
+        Paths = @(
+            'C:\Program Files\Adobe\Adobe Premiere Pro 2026\Adobe Premiere Pro.exe'
+            'C:\Program Files\Adobe\Adobe Premiere Pro 2025\Adobe Premiere Pro.exe'
+        )
         ProcessName = 'Adobe Premiere Pro'
         WindowName = 'Adobe Premiere Pro'
     }
     AfterEffects = @{
-        Path = 'C:\Program Files\Adobe\Adobe After Effects 2025\Support Files\AfterFX.exe'
+        Paths = @(
+            'C:\Program Files\Adobe\Adobe After Effects 2026\Support Files\AfterFX.exe'
+            'C:\Program Files\Adobe\Adobe After Effects 2025\Support Files\AfterFX.exe'
+        )
         ProcessName = 'AfterFX'
         WindowName = 'Adobe After Effects'
     }
 }
 $target = $catalog[$Application]
+$target.Path = @($target.Paths | Where-Object { Test-Path -LiteralPath $_ }) |
+    Select-Object -First 1
 
-if (-not (Test-Path -LiteralPath $target.Path)) {
-    throw "$Application is not installed at the expected path: $($target.Path)"
+if ([string]::IsNullOrWhiteSpace($target.Path)) {
+    throw "$Application is not installed at any supported path: $($target.Paths -join ', ')"
 }
 
 $existing = @(Get-Process -Name $target.ProcessName -ErrorAction SilentlyContinue)

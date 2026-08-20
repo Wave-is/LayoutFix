@@ -1,5 +1,6 @@
 using LayoutFix.Core.Models;
 using LayoutFix.Infrastructure.Input;
+using LayoutFix.Infrastructure.Native;
 
 namespace LayoutFix.Tests;
 
@@ -54,6 +55,63 @@ public class InputInjectorTests
         Assert.Equal(3, exception.RequestedUnitCount);
         Assert.Equal(2, exception.AffectedUnitCount);
         Assert.Equal([6, 1], callSizes);
+    }
+
+    [Fact]
+    public async Task UnicodeTextNormalizesEveryLineEndingToOneEnter()
+    {
+        Win32.INPUT[]? sentInputs = null;
+        var injector = new InputInjector(inputs =>
+        {
+            sentInputs = inputs;
+            return (uint)inputs.Length;
+        });
+
+        await injector.SendTextAsync("a\r\nb\nc\rd");
+
+        Assert.NotNull(sentInputs);
+        var keyDownScans = sentInputs!
+            .Where(input =>
+                input.type == Win32.INPUT_KEYBOARD &&
+                (input.u.ki.dwFlags & Win32.KEYEVENTF_KEYUP) == 0)
+            .Select(input => input.u.ki.wScan)
+            .ToArray();
+        Assert.Equal(
+            new ushort[] { 'a', '\r', 'b', '\r', 'c', '\r', 'd' },
+            keyDownScans);
+    }
+
+    [Fact]
+    public async Task PartialCrLfInjectionReportsBothSourceUtf16Units()
+    {
+        var callSizes = new List<int>();
+        var injector = new InputInjector(inputs =>
+        {
+            callSizes.Add(inputs.Length);
+            return (uint)(callSizes.Count == 1 ? 1 : inputs.Length);
+        });
+
+        var exception = await Assert.ThrowsAsync<InputInjectionException>(
+            () => injector.SendTextAsync("\r\nx"));
+
+        Assert.Equal(3, exception.RequestedUnitCount);
+        Assert.Equal(2, exception.AffectedUnitCount);
+        Assert.Equal([4, 1], callSizes);
+    }
+
+    [Fact]
+    public async Task LongUnicodeTextIsSentAsOneAtomicInputBatch()
+    {
+        var callSizes = new List<int>();
+        var injector = new InputInjector(inputs =>
+        {
+            callSizes.Add(inputs.Length);
+            return (uint)inputs.Length;
+        });
+
+        await injector.SendTextAsync(new string('x', 130));
+
+        Assert.Equal([260], callSizes);
     }
 
     [Fact]

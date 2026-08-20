@@ -25,6 +25,24 @@ namespace LayoutFix.WindowsE2E;
 internal static class Program
 {
     private const string ClipboardSentinel = "LAYOUTFIX_CLIPBOARD_SENTINEL";
+    private static readonly ManualCorrectionCase[] ManualCorrectionCases =
+    [
+        new("lowercase", "ghbdtn", "привет"),
+        new("title-case", "Ghbdtn", "Привет"),
+        new("uppercase", "GHBDTN", "ПРИВЕТ"),
+        new("phrase", "ghbdtn vbh", "привет мир"),
+        new("reverse-phrase", "руддщ цщкдв", "hello world"),
+        new("punctuation", "ghbdtn? vbh!", "привет, мир!"),
+        new("numbers", "ntcn 123", "тест 123"),
+        new("multiline", "ghbdtn\r\nvbh", "привет\r\nмир"),
+        new("tab", "ghbdtn\tvbh", "привет\tмир"),
+        new("emoji", "🙂 ghbdtn", "🙂 привет"),
+        new("unicode-wrappers", "«ghbdtn» — vbh", "«привет» — мир"),
+        new(
+            "long-selection",
+            string.Join(' ', Enumerable.Repeat("ghbdtn", 64)),
+            string.Join(' ', Enumerable.Repeat("привет", 64)))
+    ];
     private static int _exitCode = 1;
     private static readonly string ResultPath = Path.Combine(
         AppContext.BaseDirectory,
@@ -176,6 +194,7 @@ internal static class Program
         var partialReplacementInputRaceTest = false;
         var partialReplacementMouseRaceTest = false;
         var partialReplacementXButtonRaceTest = false;
+        var manualCorrectionMatrix = false;
         if (args.Length >= 1 && args[0] == "--physical-soak")
         {
             if (args.Length < 2 || !int.TryParse(args[1], out physicalIterations) ||
@@ -183,6 +202,11 @@ internal static class Program
             {
                 return 64;
             }
+        }
+        else if (args.Length >= 1 && args[0] == "--manual-correction-matrix")
+        {
+            manualCorrectionMatrix = true;
+            physicalIterations = ManualCorrectionCases.Length;
         }
         else if (args.Length >= 3 && args[0] == "--hotkey-vk-test")
         {
@@ -205,6 +229,24 @@ internal static class Program
             if (!long.TryParse(args[1], out var textAppHandle) || textAppHandle == 0)
                 return 64;
             existingTextAppWindow = new IntPtr(textAppHandle);
+            if (args.Length >= 3)
+            {
+                if (!long.TryParse(args[2], out var textControlHandle) ||
+                    textControlHandle == 0)
+                {
+                    return 64;
+                }
+                existingTextControlWindow = new IntPtr(textControlHandle);
+            }
+            if (args.Length >= 5)
+            {
+                configuredHotkey = args[3];
+                if (!ushort.TryParse(args[4], out configuredHotkeyVirtualKey) ||
+                    configuredHotkeyVirtualKey == 0)
+                {
+                    return 64;
+                }
+            }
         }
         else if (args.Length >= 2 && args[0] == "--aftereffects-rename-test")
         {
@@ -264,7 +306,12 @@ internal static class Program
             }
         ];
         settings.Current.AutoConversionEnabled = false;
-        settings.Current.LoggingEnabled = physicalIterations == 1;
+        var diagnosticsForced = string.Equals(
+            Environment.GetEnvironmentVariable("LAYOUTFIX_E2E_DIAGNOSTICS"),
+            "1",
+            StringComparison.Ordinal);
+        settings.Current.LoggingEnabled =
+            physicalIterations == 1 || diagnosticsForced || manualCorrectionMatrix;
         settings.Current.BlacklistedProcesses = [];
         settings.Save(settings.Current);
 
@@ -284,7 +331,7 @@ internal static class Program
         var layoutManager = new KeyboardLayoutManager(settings, new WindowsLayoutProvider());
         var layoutConverter = new LayoutConverter();
         var dictionaryAnalyzer = new DictionaryAnalyzer(layoutConverter, layoutManager, settings);
-        using var targetGuard = new WindowsTextTargetGuard(activeWindow, logger);
+        using var targetGuard = new WindowsTextTargetGuard(activeWindow, logger, settings);
         using var directTextAdapter = new AdobeInlineRenameTextAdapter(
             activeWindow,
             nativeInput,
@@ -298,7 +345,8 @@ internal static class Program
             targetGuard,
             keyboardHook,
             mouseHook,
-            directTextAdapter);
+            directTextAdapter,
+            settings);
         using var translation = new NullTranslationCoordinator();
         using var coordinator = new HotkeyCoordinator(
             keyboardHook,
@@ -331,7 +379,7 @@ internal static class Program
             Dock = DockStyle.Fill,
             Multiline = true,
             Font = new Font("Segoe UI", 18),
-            Text = "ghbdtn"
+            Text = manualCorrectionMatrix ? ManualCorrectionCases[0].Input : "ghbdtn"
         };
         form.Controls.Add(editor);
         if (partialReplacementInputRaceTest)
@@ -470,21 +518,26 @@ internal static class Program
                     await Task.Delay(100);
                     var originalTargetSelection = await textTransaction.CaptureAsync(
                         allowPreviousWordFallback: false);
-                    if (!IsExpectedCompatibilitySentinel(originalTargetSelection))
+                    for (var focusAttempt = 1;
+                         focusAttempt <= 4 &&
+                         !IsExpectedCompatibilitySentinel(originalTargetSelection);
+                         focusAttempt++)
                     {
                         AppendResult(
                             $"focus-probe:currentSelectionMatch=False;" +
-                            $"length={originalTargetSelection?.Text.Length ?? 0}");
-                        if (!await TryFocusAndSelectExternalTextAsync(
+                            $"length={originalTargetSelection?.Text.Length ?? 0};" +
+                            $"attempt={focusAttempt}");
+                        _ = await TryFocusAndSelectExternalTextAsync(
                             existingTextAppWindow,
-                            existingTextControlWindow))
-                        {
-                            throw new InvalidOperationException(
-                                "The compatibility target Document/Edit control could not be focused; no text input was sent.");
-                        }
+                            existingTextControlWindow);
 
                         SendExternalSelectAll();
-                        await Task.Delay(100);
+                        // A cold Chromium accessibility provider may finish its
+                        // first bounded safety probe after the DOM field has
+                        // already received focus. Wait for that probe gate to
+                        // recover, then require the exact sentinel before any
+                        // replacement is permitted.
+                        await Task.Delay(500);
                         originalTargetSelection = await textTransaction.CaptureAsync(
                             allowPreviousWordFallback: false);
                     }
@@ -516,6 +569,15 @@ internal static class Program
                 var completedIterations = 0;
                 for (var iteration = 1; iteration <= physicalIterations; iteration++)
                 {
+                    var manualCase = manualCorrectionMatrix
+                        ? ManualCorrectionCases[iteration - 1]
+                        : new ManualCorrectionCase("default", "ghbdtn", "привет");
+                    if (manualCorrectionMatrix)
+                    {
+                        AppendResult(
+                            $"manual-case:id={manualCase.Id};sourceLength={manualCase.Input.Length};" +
+                            $"expectedLength={manualCase.Expected.Length}");
+                    }
                     if (!TryClaimForeground(targetWindow))
                         throw new InvalidOperationException(
                             $"The E2E window lost foreground focus before iteration {iteration}; no input was sent.");
@@ -530,7 +592,7 @@ internal static class Program
 
                     if (!hasExternalTarget)
                     {
-                        editor.Text = "ghbdtn";
+                        editor.Text = manualCase.Input;
                         editor.Focus();
                         editor.SelectAll();
                     }
@@ -541,7 +603,7 @@ internal static class Program
                     }
                     await SetClipboardSentinelAsync();
 
-                    SendExternalHotkey(configuredHotkeyVirtualKey);
+                    SendExternalHotkey(configuredHotkey, configuredHotkeyVirtualKey);
                     if (partialInput != null)
                     {
                         await partialInput.FailureObserved.Task.WaitAsync(
@@ -614,10 +676,13 @@ internal static class Program
                     }
                     else
                     {
-                        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(8);
                         var expectedTargetText = partialReplacementTest
                                 ? "ghbdtn"
-                                : "привет";
+                                : manualCase.Expected;
+                        var verificationSeconds = expectedTargetText.Length <= 128
+                            ? 8
+                            : Math.Min(20, 8 + expectedTargetText.Length / 40d);
+                        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(verificationSeconds);
                         while (DateTime.UtcNow < deadline)
                         {
                             var observedText = ReadTargetText(
@@ -658,7 +723,7 @@ internal static class Program
                             : $"other-text-length-{workerClipboardText.Length}";
                     var expectedText = partialReplacementTest
                             ? "ghbdtn"
-                            : "привет";
+                            : manualCase.Expected;
                     var targetTextMatches = partialReplacementInputRaceTest
                         ? targetText.StartsWith("пр", StringComparison.Ordinal) &&
                           targetText.Length > 2
@@ -765,10 +830,39 @@ internal static class Program
 
         if (File.Exists(logPath))
         {
+            var logText = File.ReadAllText(logPath);
             AppendResult("log:begin");
-            foreach (var line in File.ReadLines(logPath))
+            foreach (var line in logText.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries))
                 AppendResult(line);
             AppendResult("log:end");
+
+            if (settings.Current.LoggingEnabled)
+            {
+                var captureDiagnostic = logText.Contains(
+                    "SupportDiagnostic: CaptureId=",
+                    StringComparison.Ordinal);
+                var targetDiagnostic = logText.Contains(
+                    "Phase=target-probe",
+                    StringComparison.Ordinal);
+                var targetProcessDiagnostic = logText.Contains(
+                    "TargetProcess=",
+                    StringComparison.Ordinal);
+                var privateContentAbsent =
+                    !ManualCorrectionCases.Any(testCase =>
+                        logText.Contains(testCase.Input, StringComparison.Ordinal) ||
+                        logText.Contains(testCase.Expected, StringComparison.Ordinal)) &&
+                    !logText.Contains(ClipboardSentinel, StringComparison.Ordinal);
+                AppendResult(
+                    $"diagnostics:capture={captureDiagnostic};target={targetDiagnostic};" +
+                    $"process={targetProcessDiagnostic};privacy={privateContentAbsent};" +
+                    $"forced={diagnosticsForced}");
+                if (_exitCode == 0 &&
+                    (!captureDiagnostic || !targetDiagnostic ||
+                     !targetProcessDiagnostic || !privateContentAbsent))
+                {
+                    _exitCode = 87;
+                }
+            }
         }
 
         try { Directory.Delete(testDirectory, recursive: true); } catch { }
@@ -1060,7 +1154,16 @@ internal static class Program
                 <body>
                   <label>LayoutFix compatibility target</label>
                   {{target}}
-                  <script>addEventListener('load',()=>{const t=document.getElementById('target');t.focus();{{selectScript}}});</script>
+                  <script>
+                    addEventListener('load',()=>{
+                      const t=document.getElementById('target');
+                      const activate=()=>{t.focus();{{selectScript}}};
+                      activate();
+                      addEventListener('focus',()=>setTimeout(activate,0));
+                      setTimeout(activate,250);
+                      setTimeout(activate,1000);
+                    });
+                  </script>
                 </body>
                 </html>
                 """;
@@ -5943,8 +6046,35 @@ internal static class Program
     private static void AppendResult(string value) =>
         File.AppendAllText(ResultPath, $"{value}{Environment.NewLine}");
 
-    private static void SendExternalHotkey(ushort virtualKey) =>
-        SendExternalChord(0x11, virtualKey);
+    private static void SendExternalHotkey(string configuredHotkey, ushort virtualKey)
+    {
+        var combo = HotkeyCombo.Parse(configuredHotkey);
+        if (combo.Win)
+            throw new InvalidOperationException("Windows-key E2E hotkeys are not supported.");
+
+        var pressedModifiers = new List<ushort>();
+        if (combo.Ctrl) pressedModifiers.Add(0x11);
+        if (combo.Alt) pressedModifiers.Add(0x12);
+        if (combo.Shift) pressedModifiers.Add(0x10);
+
+        var inputs = new List<Win32.INPUT>(pressedModifiers.Count * 2 + 2);
+        inputs.AddRange(pressedModifiers.Select(modifier => KeyboardInput(modifier, 0)));
+        inputs.Add(KeyboardInput(virtualKey, 0));
+        inputs.Add(KeyboardInput(virtualKey, Win32.KEYEVENTF_KEYUP));
+        inputs.AddRange(pressedModifiers
+            .AsEnumerable()
+            .Reverse()
+            .Select(modifier => KeyboardInput(modifier, Win32.KEYEVENTF_KEYUP)));
+
+        var batch = inputs.ToArray();
+        var sent = Win32.SendInput((uint)batch.Length, batch, Marshal.SizeOf<Win32.INPUT>());
+        if (sent != batch.Length)
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                $"Physical hotkey E2E SendInput accepted {sent} of {batch.Length} events.");
+        }
+    }
 
     private static void SendExternalSelectAll() => SendExternalChord(0x11, (ushort)'A');
 
@@ -6546,6 +6676,11 @@ internal static class Program
             throw new InvalidOperationException("Clipboard must not run for a rejected text target.");
         }
     }
+
+    private sealed record ManualCorrectionCase(
+        string Id,
+        string Input,
+        string Expected);
 
     private sealed class E2ENullLogger : ILoggerService
     {

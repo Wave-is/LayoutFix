@@ -46,6 +46,70 @@ public class WindowsTextTargetGuardTests
         Assert.Equal(expected, WindowsTextTargetGuard.IsWritableNativeEditStyle(style));
     }
 
+    [Theory]
+    [InlineData("Chrome_WidgetWin_1", 4242, 4242u, false, true, "Chrome_WidgetWin_1", true)]
+    [InlineData("Notepad", 4242, 4242u, false, true, "Chrome_WidgetWin_1", false)]
+    [InlineData("Chrome_WidgetWin_1", 4243, 4242u, false, true, "Chrome_WidgetWin_1", false)]
+    [InlineData("Chrome_WidgetWin_1", 4242, 4242u, true, true, "Chrome_WidgetWin_1", false)]
+    [InlineData("Chrome_WidgetWin_1", 4242, 4242u, false, false, "Chrome_WidgetWin_1", false)]
+    [InlineData("Chrome_WidgetWin_1", 4242, 4242u, false, true, "Chrome_RenderWidgetHostHWND", false)]
+    public void ChromiumRootPaneFallback_IsNarrowlyClassified(
+        string foregroundClass,
+        int focusedProcessId,
+        uint expectedProcessId,
+        bool isPassword,
+        bool isPane,
+        string focusedClass,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            WindowsTextTargetGuard.IsChromiumRootPaneFallbackCandidate(
+                foregroundClass,
+                focusedProcessId,
+                expectedProcessId,
+                isPassword,
+                isPane,
+                focusedClass));
+    }
+
+    [Fact]
+    public async Task ChromiumCompatibilityFallback_StillRequiresFocusRecheck()
+    {
+        var windows = new FakeActiveWindowProvider { RemainingMatches = 1 };
+        using var guard = new WindowsTextTargetGuard(
+            windows,
+            new NullLogger(),
+            _ => false,
+            _ => null,
+            _ => TargetInputAccess.Allowed,
+            settingsService: null,
+            compatibilityFallbackProbe: _ => true);
+
+        Assert.False(await guard.CanModifyAsync(Context));
+    }
+
+    [Fact]
+    public async Task ChromiumCompatibilityFallback_AllowsOnlyAfterPrimaryProbeRejects()
+    {
+        var primaryProbeCalls = 0;
+        using var guard = new WindowsTextTargetGuard(
+            new FakeActiveWindowProvider(),
+            new NullLogger(),
+            _ =>
+            {
+                Interlocked.Increment(ref primaryProbeCalls);
+                return false;
+            },
+            _ => null,
+            _ => TargetInputAccess.Allowed,
+            settingsService: null,
+            compatibilityFallbackProbe: _ => true);
+
+        Assert.True(await guard.CanModifyAsync(Context));
+        Assert.Equal(1, primaryProbeCalls);
+    }
+
     [Fact]
     public async Task DeniesSecureTarget()
     {

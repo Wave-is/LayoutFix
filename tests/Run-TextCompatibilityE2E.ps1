@@ -5,6 +5,8 @@ param(
 
     [switch]$IncludeWordPad,
 
+    [switch]$NoBuild,
+
     [ValidateRange(0, [long]::MaxValue)]
     [long]$ExistingTextAppHandle = 0
 )
@@ -19,9 +21,11 @@ $dotnet = if (Test-Path $localDotnet) {
     (Get-Command dotnet -ErrorAction Stop).Source
 }
 
-& $dotnet build $project -c Release -r win-x64 --no-restore
-if ($LASTEXITCODE -ne 0) {
-    throw "Windows E2E harness build failed with exit code $LASTEXITCODE."
+if (-not $NoBuild) {
+    & $dotnet build $project -c Release -r win-x64 --no-restore
+    if ($LASTEXITCODE -ne 0) {
+        throw "Windows E2E harness build failed with exit code $LASTEXITCODE."
+    }
 }
 
 $harness = Join-Path $repoRoot 'tests\LayoutFix.WindowsE2E\bin\Release\net8.0-windows\win-x64\LayoutFix.WindowsE2E.exe'

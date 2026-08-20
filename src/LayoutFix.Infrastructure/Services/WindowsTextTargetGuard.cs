@@ -14,7 +14,8 @@ namespace LayoutFix.Infrastructure.Services;
 /// </summary>
 public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
 {
-    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromMilliseconds(300);
+    private const int ProbeTimeoutMilliseconds = 800;
+    private const int ChromiumProbeTimeoutMilliseconds = 2_500;
     private static readonly TimeSpan BusyWarningThrottle = TimeSpan.FromSeconds(2);
     private readonly IActiveWindowProvider _activeWindow;
     private readonly ILoggerService _logger;
@@ -22,6 +23,7 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
     private readonly Func<ActiveWindowContext, bool> _probe;
     private readonly Func<nint, bool?> _nativeProbe;
     private readonly Func<uint, TargetInputAccess> _integrityProbe;
+    private readonly Func<ActiveWindowContext, bool> _compatibilityFallbackProbe;
     private readonly ISettingsService? _settingsService;
     private long _lastBusyWarningTimestamp;
     private long _lastHigherIntegrityWarningTimestamp;
@@ -87,7 +89,8 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
         Func<ActiveWindowContext, bool> probe,
         Func<nint, bool?> nativeProbe,
         Func<uint, TargetInputAccess> integrityProbe,
-        ISettingsService? settingsService = null)
+        ISettingsService? settingsService = null,
+        Func<ActiveWindowContext, bool>? compatibilityFallbackProbe = null)
     {
         _activeWindow = activeWindow;
         _logger = logger;
@@ -95,6 +98,7 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
         _nativeProbe = nativeProbe;
         _integrityProbe = integrityProbe;
         _settingsService = settingsService;
+        _compatibilityFallbackProbe = compatibilityFallbackProbe ?? ProbeChromiumRootPane;
     }
 
     public async Task<bool> CanModifyAsync(
@@ -169,10 +173,15 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
                 return accepted;
             }
 
+            var probeTimeoutMilliseconds = IsChromiumTopLevelWindow(context)
+                ? ChromiumProbeTimeoutMilliseconds
+                : ProbeTimeoutMilliseconds;
             var probeTask = Task.Run(() => _probe(context), CancellationToken.None);
             var completed = await Task.WhenAny(
                 probeTask,
-                Task.Delay(ProbeTimeout, cancellationToken));
+                Task.Delay(
+                    TimeSpan.FromMilliseconds(probeTimeoutMilliseconds),
+                    cancellationToken));
             if (completed != probeTask)
             {
                 releaseGate = false;
@@ -183,17 +192,28 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
                     TaskScheduler.Default);
                 cancellationToken.ThrowIfCancellationRequested();
                 _logger.LogWarning("Text target safety probe timed out; operation rejected.");
-                LogSupportDiagnostic("rejected", "accessibility-probe-timeout", "Probe=uia; TimeoutMs=300");
+                LogSupportDiagnostic(
+                    "rejected",
+                    "accessibility-probe-timeout",
+                    $"Probe=uia; TimeoutMs={probeTimeoutMilliseconds}");
                 return false;
             }
 
             var editable = await probeTask;
             var focusMatches = _activeWindow.IsSameActiveWindow(context);
-            var result = editable && focusMatches;
+            var compatibilityFallback = !editable &&
+                focusMatches &&
+                _compatibilityFallbackProbe(context);
+            var result = (editable || compatibilityFallback) && focusMatches;
             LogSupportDiagnostic(
                 result ? "accepted" : "rejected",
-                editable ? "uia-focus-recheck" : "uia-target-not-editable",
-                $"Probe=uia; SameWindow={focusMatches}");
+                editable
+                    ? "uia-focus-recheck"
+                    : compatibilityFallback
+                        ? "chromium-root-pane-fallback"
+                        : "uia-target-not-editable",
+                $"Probe={(compatibilityFallback ? "chromium-fallback" : "uia")}; " +
+                $"SameWindow={focusMatches}");
             return result;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -325,6 +345,55 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
         isKeyboardFocusable &&
         !isPassword &&
         (hasWritableValuePattern || (isEditOrDocument && hasTextPattern));
+
+    private static bool ProbeChromiumRootPane(ActiveWindowContext context)
+    {
+        try
+        {
+            var element = AutomationElement.FocusedElement;
+            if (element == null)
+                return false;
+
+            var current = element.Current;
+            return IsChromiumRootPaneFallbackCandidate(
+                WindowClass(context.ForegroundWindow),
+                current.ProcessId,
+                context.ProcessId,
+                current.IsPassword,
+                current.ControlType == ControlType.Pane,
+                current.ClassName);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsChromiumTopLevelWindow(ActiveWindowContext context) =>
+        string.Equals(
+            WindowClass(context.ForegroundWindow),
+            "Chrome_WidgetWin_1",
+            StringComparison.Ordinal);
+
+    internal static bool IsChromiumRootPaneFallbackCandidate(
+        string foregroundClass,
+        int focusedProcessId,
+        uint expectedProcessId,
+        bool isPassword,
+        bool isPane,
+        string? focusedClass) =>
+        expectedProcessId != 0 &&
+        focusedProcessId == checked((int)expectedProcessId) &&
+        !isPassword &&
+        isPane &&
+        string.Equals(
+            foregroundClass,
+            "Chrome_WidgetWin_1",
+            StringComparison.Ordinal) &&
+        string.Equals(
+            focusedClass,
+            "Chrome_WidgetWin_1",
+            StringComparison.Ordinal);
 
     private static bool? ProbeNativeEdit(nint focusedWindow)
     {

@@ -126,6 +126,31 @@ public class TextTransactionServiceTests
     }
 
     [Fact]
+    public async Task LongReplacement_UsesPasteAndRestoresOriginalClipboard()
+    {
+        var originalClipboard = "user clipboard payload";
+        var source = new string('x', 160);
+        var replacement = new string('я', 160);
+        var clipboard = new FakeClipboardService(originalClipboard);
+        var input = new FakeInputInjector(clipboard, source, source);
+        var service = new TextTransactionService(
+            input,
+            clipboard,
+            new FakeActiveWindowProvider(),
+            new NullLogger());
+
+        var selection = await service.CaptureAsync(allowPreviousWordFallback: false);
+        var replaced = await service.ReplaceAsync(selection!, replacement);
+
+        Assert.True(replaced);
+        Assert.Equal(replacement, input.PastedText);
+        Assert.Equal(1, input.PasteCount);
+        Assert.Null(input.SentText);
+        Assert.Equal(originalClipboard, clipboard.Value);
+        Assert.Equal(3, clipboard.RestoreCount);
+    }
+
+    [Fact]
     public async Task Replace_AbortsWhenSelectionChangedAfterCapture()
     {
         var clipboard = new FakeClipboardService("original clipboard");
@@ -467,6 +492,8 @@ public class TextTransactionServiceTests
         public List<int> BackspaceBatches { get; } = [];
         public int SelectWordCount { get; private set; }
         public int CollapseSelectionCount { get; private set; }
+        public int PasteCount { get; private set; }
+        public string? PastedText { get; private set; }
 
         public Task SendKeyCombinationAsync(bool ctrl, bool alt, bool shift, string key)
         {
@@ -480,6 +507,11 @@ public class TextTransactionServiceTests
             else if (!ctrl && key.Equals("right", StringComparison.OrdinalIgnoreCase))
             {
                 CollapseSelectionCount++;
+            }
+            else if (ctrl && key.Equals("v", StringComparison.OrdinalIgnoreCase))
+            {
+                PasteCount++;
+                PastedText = clipboard.Value;
             }
 
             return Task.CompletedTask;

@@ -9,6 +9,7 @@ public sealed class TextTransactionService : ITextTransactionService
 {
     private static readonly TimeSpan CopyTimeout = TimeSpan.FromMilliseconds(750);
     private const int CopyAttempts = 3;
+    private const int ClipboardPasteThreshold = 128;
     private const int RollbackModifierReleaseTimeoutMilliseconds = 250;
     private readonly IInputInjector _input;
     private readonly IClipboardService _clipboard;
@@ -327,12 +328,21 @@ public sealed class TextTransactionService : ITextTransactionService
             }
 
             replacementInputGeneration = CaptureInputGeneration();
-            await _input.SendTextAsync(replacement);
+            var replacementReason = "input-injected";
+            if (replacement.Length >= ClipboardPasteThreshold)
+            {
+                await PasteTextAsync(replacement, cancellationToken);
+                replacementReason = "clipboard-paste";
+            }
+            else
+            {
+                await _input.SendTextAsync(replacement);
+            }
             LogSupportDiagnostic(
                 captureId,
                 "replacement",
                 "accepted",
-                "input-injected",
+                replacementReason,
                 $"SourceLength={selection.Text.Length}; ResultLength={replacement.Length}");
             return true;
         }
@@ -411,6 +421,27 @@ public sealed class TextTransactionService : ITextTransactionService
 
         _logger.LogWarning("Clipboard copy did not complete after bounded retries.");
         return null;
+    }
+
+    private async Task PasteTextAsync(
+        string text,
+        CancellationToken cancellationToken)
+    {
+        using var snapshot = await _clipboard.CaptureAsync(cancellationToken);
+        _logger.LogInfo("Clipboard snapshot captured for long text replacement.");
+        try
+        {
+            await _clipboard.SetTextAsync(text, cancellationToken);
+            await _input.SendKeyCombinationAsync(true, false, false, "v");
+            // Ctrl+V is queued to the target UI thread. Give it one bounded
+            // processing turn before restoring every original clipboard format.
+            await Task.Delay(100, cancellationToken);
+        }
+        finally
+        {
+            await _clipboard.RestoreAsync(snapshot, CancellationToken.None);
+            _logger.LogInfo("Clipboard snapshot restored after long text replacement.");
+        }
     }
 
     private async Task CollapseFallbackSelectionAsync(

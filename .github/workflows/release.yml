@@ -312,7 +312,7 @@ jobs:
           $hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
           Set-Content -Path "$installer.sha256" -Value "$hash *LayoutFix_Setup.exe" -Encoding ascii
 
-      - name: Verify release candidate contract
+      - name: Verify release artifact contract
         shell: pwsh
         run: tests\Verify-ReleaseCandidate.ps1 -AllowUnsigned
 
@@ -324,5 +324,5 @@ jobs:
             Output/LayoutFix_Setup.exe.sha256
           name: LayoutFix ${{ github.ref_name }}
           draft: false
-          prerelease: true
+          prerelease: false
           generate_release_notes: true

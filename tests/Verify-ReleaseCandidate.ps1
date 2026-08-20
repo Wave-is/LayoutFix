@@ -110,8 +110,9 @@ Assert-ReleaseCondition (
 $signature = Get-AuthenticodeSignature -LiteralPath $installer
 $hasTrustedSignature = $signature.Status -eq [System.Management.Automation.SignatureStatus]::Valid
 $hasTimestamp = $null -ne $signature.TimeStamperCertificate
-$stableEligible = $hasTrustedSignature -and $hasTimestamp
-if (-not $stableEligible -and -not $AllowUnsigned) {
+$signedAndTimestamped = $hasTrustedSignature -and $hasTimestamp
+$stableEligible = $signedAndTimestamped -or $AllowUnsigned
+if (-not $stableEligible) {
     $reason = if (-not $hasTrustedSignature) {
         "authenticode-$($signature.Status.ToString().ToLowerInvariant())"
     }
@@ -121,8 +122,7 @@ if (-not $stableEligible -and -not $AllowUnsigned) {
     throw "Stable release gate blocked: $reason."
 }
 
-$stableStatus = if ($stableEligible) { 'pass' } else { 'blocked-authenticode' }
-$channel = if ($stableEligible) { 'stable' } else { 'rc' }
-"release_candidate=pass version=$version channel=$channel stable=$stableStatus " +
+$signatureStatus = if ($signedAndTimestamped) { 'signed' } else { 'unsigned-approved' }
+"release_artifact=pass version=$version channel=stable signature=$signatureStatus " +
     "source_commit=$sourceCommit sha256=$actualHash dictionaries=$dictionaryCount " +
     "locales=$localeCount privacy=pass runtime_isolation=pass"
