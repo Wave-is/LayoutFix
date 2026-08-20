@@ -48,7 +48,6 @@ if (-not (Test-Path -LiteralPath $e2eExecutable)) {
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
-Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -222,45 +221,6 @@ function Get-PhotoshopWindowDiagnostics {
     return $lines -join [Environment]::NewLine
 }
 
-function Save-PhotoshopDiagnosticScreenshot {
-    param(
-        [Parameter(Mandatory)]
-        [System.Windows.Automation.AutomationElement]$Window,
-        [Parameter(Mandatory)]
-        [int]$ProcessId
-    )
-
-    $current = $Window.Current
-    if ($current.ProcessId -ne $ProcessId) {
-        throw 'Photoshop diagnostic screenshot target identity changed.'
-    }
-    $bounds = $current.BoundingRectangle
-    $width = [Math]::Max(1, [int][Math]::Ceiling($bounds.Width))
-    $height = [Math]::Max(1, [int][Math]::Ceiling($bounds.Height))
-    $path = Join-Path ([IO.Path]::GetTempPath()) `
-        'LayoutFix-Photoshop-save-dialog-diagnostic.png'
-    $bitmap = [Drawing.Bitmap]::new($width, $height)
-    try {
-        $graphics = [Drawing.Graphics]::FromImage($bitmap)
-        try {
-            $graphics.CopyFromScreen(
-                [int]$bounds.Left,
-                [int]$bounds.Top,
-                0,
-                0,
-                [Drawing.Size]::new($width, $height))
-        }
-        finally {
-            $graphics.Dispose()
-        }
-        $bitmap.Save($path, [Drawing.Imaging.ImageFormat]::Png)
-    }
-    finally {
-        $bitmap.Dispose()
-    }
-    return $path
-}
-
 function Close-VerifiedSaveDialog {
     param(
         [Parameter(Mandatory)]
@@ -356,12 +316,9 @@ for ($run = 1; $run -le $Runs; $run++) {
         }
         if ($target.Count -ne 2) {
             $diagnostics = Get-PhotoshopWindowDiagnostics -ProcessId $startedProcess.Id
-            $screenshotPath = Save-PhotoshopDiagnosticScreenshot `
-                -Window $mainWindow[0] `
-                -ProcessId $startedProcess.Id
             throw (
                 "Photoshop did not expose a verified Save As filename field within " +
-                "45 seconds. screenshot=$screenshotPath`n$diagnostics")
+                "45 seconds. No screen image was captured.`n$diagnostics")
         }
 
         $dialog = $target[0]
