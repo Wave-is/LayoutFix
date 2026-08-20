@@ -179,6 +179,10 @@ jobs:
         shell: pwsh
         run: tests\Run-ConfigurableHotkeyE2E.ps1 -Runs 3 -NoBuild
 
+      - name: Verify manual correction matrix
+        shell: pwsh
+        run: tests\Run-ManualCorrectionMatrixE2E.ps1 -Runs 3 -NoBuild
+
       - name: Verify installer existing-session guard
         shell: pwsh
         run: tests\Run-InstallerExistingProcessGuardE2E.ps1
