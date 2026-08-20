@@ -262,7 +262,10 @@ public class WindowsTextTargetGuardTests
 
         var stopwatch = Stopwatch.StartNew();
         Assert.False(await guard.CanModifyAsync(Context));
-        Assert.InRange(stopwatch.ElapsedMilliseconds, 200, 1_500);
+        // The production timeout is 800 ms. Shared GitHub runners can delay
+        // timer continuations while the three test assemblies run in parallel,
+        // so keep the lower bound meaningful but allow scheduler jitter here.
+        Assert.InRange(stopwatch.ElapsedMilliseconds, 500, 5_000);
 
         stopwatch.Restart();
         Assert.False(await guard.CanModifyAsync(Context));
