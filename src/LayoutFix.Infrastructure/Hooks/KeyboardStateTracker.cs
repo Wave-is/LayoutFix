@@ -25,7 +25,7 @@ internal sealed class KeyboardStateTracker
 
     public void SeedModifiers(Func<int, bool> isPressed)
     {
-        _pressedKeys.RemoveWhere(IsModifier);
+        _pressedKeys.RemoveWhere(IsModifierKey);
         foreach (var key in ModifierKeys)
         {
             if (isPressed(key))
@@ -159,7 +159,7 @@ internal sealed class KeyboardStateTracker
 
     private bool TryUpdateModifier(int virtualKey)
     {
-        if (!IsModifier(virtualKey))
+        if (!IsModifierKey(virtualKey))
             return false;
 
         RefreshModifierState();
@@ -176,7 +176,7 @@ internal sealed class KeyboardStateTracker
 
     private bool IsAnyPressed(params int[] keys) => keys.Any(_pressedKeys.Contains);
 
-    private static bool IsModifier(int key) => ModifierKeys.Contains(key);
+    internal static bool IsModifierKey(int key) => ModifierKeys.Contains(key);
 
     private static readonly int[] ModifierKeys =
     [

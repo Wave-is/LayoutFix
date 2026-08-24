@@ -36,7 +36,10 @@ public class HotkeyCoordinator : IHotkeyCoordinator
     private readonly CancellationTokenSource _shutdownCancellation = new();
     private Task? _bindingRefreshTask;
     private ShortcutBinding[] _shortcutBindings = [];
-    private int _hotkeyRequestPending;
+    // Zero means idle; otherwise the value is the pending HotkeyAction plus one.
+    // Keeping the action in the atomic state lets us collapse a quick duplicate
+    // press without showing an error while still rejecting a conflicting action.
+    private int _pendingHotkeyAction;
     private long _lastBusyNotificationTimestamp;
     private bool _disposed;
     private readonly IKeyboardHook _keyboardHook;
@@ -179,9 +182,23 @@ public class HotkeyCoordinator : IHotkeyCoordinator
             if (binding == null || IsBlacklisted()) return;
 
             e.Handled = true;
-            if (Interlocked.CompareExchange(ref _hotkeyRequestPending, 1, 0) != 0)
+            var requestedState = (int)binding.Action + 1;
+            var pendingState = Interlocked.CompareExchange(
+                ref _pendingHotkeyAction,
+                requestedState,
+                0);
+            if (pendingState != 0)
             {
-                ReportBusyHotkey(binding.Action);
+                if (pendingState == requestedState)
+                {
+                    _logger.LogInfo(
+                        $"Action: {binding.Action}; Outcome: duplicate hotkey coalesced " +
+                        "because the same action is already running.");
+                }
+                else
+                {
+                    ReportBusyHotkey(binding.Action);
+                }
                 return;
             }
 
@@ -190,7 +207,7 @@ public class HotkeyCoordinator : IHotkeyCoordinator
                     Completion: null,
                     IsHotkey: true)))
             {
-                Volatile.Write(ref _hotkeyRequestPending, 0);
+                Interlocked.CompareExchange(ref _pendingHotkeyAction, 0, requestedState);
                 ReportBusyHotkey(binding.Action);
             }
         }
@@ -331,7 +348,7 @@ public class HotkeyCoordinator : IHotkeyCoordinator
             finally
             {
                 if (request.IsHotkey)
-                    Volatile.Write(ref _hotkeyRequestPending, 0);
+                    Volatile.Write(ref _pendingHotkeyAction, 0);
             }
         }
     }

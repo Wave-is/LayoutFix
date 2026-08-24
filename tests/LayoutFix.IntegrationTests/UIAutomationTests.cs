@@ -348,7 +348,7 @@ public class UIAutomationTests
     }
 
     [Fact]
-    public async Task BusyHotkey_IsRejectedWithoutBacklogAndRecoversAfterCompletion()
+    public async Task ConflictingBusyHotkey_IsRejectedWithoutBacklogAndRecoversAfterCompletion()
     {
         var hook = new FakeKeyboardHook();
         const string privateText = "ghbdtn";
@@ -375,7 +375,7 @@ public class UIAutomationTests
         var first = hook.Press(HotkeyCombo.Parse("Scroll"));
         await transaction.FirstCaptureStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
         var rejected = Enumerable.Range(0, 16)
-            .Select(_ => hook.Press(HotkeyCombo.Parse("Scroll")))
+            .Select(_ => hook.Press(HotkeyCombo.Parse("Shift+Scroll")))
             .ToArray();
         await popup.Notified.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
@@ -408,6 +408,49 @@ public class UIAutomationTests
     }
 
     [Fact]
+    public async Task DuplicateBusyHotkey_IsCoalescedWithoutErrorNotification()
+    {
+        var hook = new FakeKeyboardHook();
+        var transaction = new BlockingThenRecordingTextTransactionService("ghbdtn");
+        var popup = new RecordingPopupService();
+        var logger = new RecordingLogger();
+        using var coordinator = new HotkeyCoordinator(
+            hook,
+            transaction,
+            new FakeSettingsService(),
+            new FakeKeyboardLayoutManager(),
+            new LayoutConverter(),
+            new TextTransformer(),
+            new TransliterationService(),
+            new NumberToTextConverter(),
+            logger,
+            new RecordingActiveWindowProvider(),
+            new NullSoundService(),
+            new FakeTranslationCoordinator(),
+            new NullTranslatorWindowProvider(),
+            popupService: popup);
+        coordinator.Initialize();
+
+        var first = hook.Press(HotkeyCombo.Parse("Shift+Scroll"));
+        await transaction.FirstCaptureStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var duplicates = Enumerable.Range(0, 16)
+            .Select(_ => hook.Press(HotkeyCombo.Parse("Shift+Scroll")))
+            .ToArray();
+
+        Assert.True(first.Handled);
+        Assert.All(duplicates, args => Assert.True(args.Handled));
+        Assert.Equal(1, transaction.CaptureCount);
+        Assert.Empty(popup.Messages);
+        Assert.Empty(logger.Warnings);
+        Assert.Contains(
+            logger.Infos,
+            message => message.Contains("duplicate hotkey coalesced", StringComparison.Ordinal));
+
+        transaction.ReleaseFirstCapture();
+        await transaction.FirstActionCompleted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
     public async Task BusyHotkey_FeedbackNeverBlocksHookCallback()
     {
         var hook = new FakeKeyboardHook();
@@ -432,7 +475,7 @@ public class UIAutomationTests
 
         hook.Press(HotkeyCombo.Parse("Scroll"));
         await transaction.FirstCaptureStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        var rejectedTask = Task.Run(() => hook.Press(HotkeyCombo.Parse("Scroll")));
+        var rejectedTask = Task.Run(() => hook.Press(HotkeyCombo.Parse("Shift+Scroll")));
 
         try
         {
@@ -855,8 +898,9 @@ public class UIAutomationTests
 
     private sealed class RecordingLogger : ILoggerService
     {
+        public System.Collections.Concurrent.ConcurrentQueue<string> Infos { get; } = new();
         public System.Collections.Concurrent.ConcurrentQueue<string> Warnings { get; } = new();
-        public void LogInfo(string message) { }
+        public void LogInfo(string message) => Infos.Enqueue(message);
         public void LogWarning(string message) => Warnings.Enqueue(message);
         public void LogError(string message, Exception? ex = null) { }
     }

@@ -94,11 +94,19 @@ public class KeyboardHook : IKeyboardHook
                     hookStruct.time);
                 var transition = _state.ProcessKeyDown(vkCode, hookStruct.flags, hookStruct.time);
                 var suppressedRepeat = transition.IsRepeat && _state.IsSuppressed(vkCode);
-                if (ShouldAdvanceInputGeneration(transition, suppressedRepeat))
-                    Interlocked.Increment(ref _inputGeneration);
 
                 if (transition.Combo == null)
+                {
+                    if (ShouldAdvanceInputGeneration(
+                            transition,
+                            suppressedRepeat,
+                            handledHotkey: false,
+                            modifierOnly: KeyboardStateTracker.IsModifierKey(vkCode)))
+                    {
+                        Interlocked.Increment(ref _inputGeneration);
+                    }
                     return Win32.CallNextHookEx(_hookId, nCode, wParam, lParam);
+                }
 
                 if (suppressedRepeat)
                     return new IntPtr(1);
@@ -110,6 +118,20 @@ public class KeyboardHook : IKeyboardHook
                     text.Text,
                     text.IsDeadKey);
                 HotkeyPressed?.Invoke(this, args);
+
+                // A shortcut consumed by LayoutFix is control input, not a change to
+                // the target document. Counting a second handled Scroll Lock press
+                // invalidated the first in-flight capture and produced LF-HK-004 in
+                // otherwise ordinary Chrome fields. Unhandled physical keys still
+                // advance selection ownership and retain the stale-selection guard.
+                if (ShouldAdvanceInputGeneration(
+                        transition,
+                        suppressedRepeat,
+                        handledHotkey: args.Handled,
+                        modifierOnly: false))
+                {
+                    Interlocked.Increment(ref _inputGeneration);
+                }
 
                 if (args.Handled)
                 {
@@ -161,8 +183,10 @@ public class KeyboardHook : IKeyboardHook
 
     internal static bool ShouldAdvanceInputGeneration(
         KeyboardTransition transition,
-        bool suppressedRepeat) =>
-        !transition.IsRepeat || !suppressedRepeat;
+        bool suppressedRepeat,
+        bool handledHotkey,
+        bool modifierOnly) =>
+        !handledHotkey && !modifierOnly && (!transition.IsRepeat || !suppressedRepeat);
 
     public void Dispose()
     {

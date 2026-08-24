@@ -103,10 +103,45 @@ public class KeyboardStateTrackerTests
         Assert.True(ordinaryRepeat.IsRepeat);
         Assert.False(KeyboardHook.ShouldAdvanceInputGeneration(
             suppressedRepeat,
-            suppressedRepeat: true));
+            suppressedRepeat: true,
+            handledHotkey: true,
+            modifierOnly: false));
         Assert.True(KeyboardHook.ShouldAdvanceInputGeneration(
             ordinaryRepeat,
-            suppressedRepeat: false));
+            suppressedRepeat: false,
+            handledHotkey: false,
+            modifierOnly: false));
+    }
+
+    [Fact]
+    public void HandledHotkey_IsNotCountedAsTargetDocumentInput()
+    {
+        var tracker = new KeyboardStateTracker();
+        var hotkey = tracker.ProcessKeyDown(Win32.VK_SCROLL, 0);
+
+        Assert.False(hotkey.IsRepeat);
+        Assert.False(KeyboardHook.ShouldAdvanceInputGeneration(
+            hotkey,
+            suppressedRepeat: false,
+            handledHotkey: true,
+            modifierOnly: false));
+        Assert.True(KeyboardHook.ShouldAdvanceInputGeneration(
+            hotkey,
+            suppressedRepeat: false,
+            handledHotkey: false,
+            modifierOnly: false));
+    }
+
+    [Fact]
+    public void ModifierOnlyKey_IsNotCountedAsTargetDocumentInput()
+    {
+        var transition = new KeyboardTransition(null, IsRepeat: false);
+
+        Assert.False(KeyboardHook.ShouldAdvanceInputGeneration(
+            transition,
+            suppressedRepeat: false,
+            handledHotkey: false,
+            modifierOnly: true));
     }
 
     [Fact]

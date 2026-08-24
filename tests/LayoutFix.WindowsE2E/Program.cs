@@ -196,6 +196,7 @@ internal static class Program
         BrowserCompatibilityHost? browserHost = null;
         string? browserKind = null;
         string? browserTargetKind = null;
+        var duplicateBrowserHotkeyDuringAction = false;
         var partialReplacementTest = false;
         var partialReplacementInputRaceTest = false;
         var partialReplacementMouseRaceTest = false;
@@ -268,6 +269,12 @@ internal static class Program
             browserTargetKind = args[1].ToLowerInvariant();
             if (browserTargetKind is not ("input" or "textarea" or "contenteditable"))
                 return 64;
+            if (args.Length >= 3)
+            {
+                if (!string.Equals(args[2], "duplicate", StringComparison.OrdinalIgnoreCase))
+                    return 64;
+                duplicateBrowserHotkeyDuringAction = true;
+            }
             browserHost = BrowserCompatibilityHost.Start(browserKind, browserTargetKind);
             existingTextAppWindow = browserHost.MainWindowHandle;
         }
@@ -293,7 +300,8 @@ internal static class Program
         File.WriteAllText(ResultPath, $"start {DateTimeOffset.UtcNow:O}{Environment.NewLine}");
         if (browserTargetKind != null)
             AppendResult(
-                $"browser-host={browserKind};target={browserTargetKind};isolatedProfile=True");
+                $"browser-host={browserKind};target={browserTargetKind};isolatedProfile=True;" +
+                $"duplicateHotkey={duplicateBrowserHotkeyDuringAction}");
         AppendResult(
             $"physical-hotkey:configured={configuredHotkey};vk=0x{configuredHotkeyVirtualKey:X2}");
 
@@ -608,6 +616,15 @@ internal static class Program
                     await SetClipboardSentinelAsync();
 
                     SendExternalHotkey(configuredHotkey, configuredHotkeyVirtualKey);
+                    if (duplicateBrowserHotkeyDuringAction)
+                    {
+                        // Reproduce a quick second discrete press while Chromium is
+                        // still completing capture. It must be coalesced without
+                        // invalidating the input-ownership snapshot of the first action.
+                        await Task.Delay(150);
+                        SendExternalHotkey(configuredHotkey, configuredHotkeyVirtualKey);
+                        AppendResult("browser-hotkey:duplicate-sent=True");
+                    }
                     if (partialInput != null)
                     {
                         await partialInput.FailureObserved.Task.WaitAsync(
@@ -865,6 +882,27 @@ internal static class Program
                      !targetProcessDiagnostic || !privateContentAbsent))
                 {
                     _exitCode = 87;
+                }
+            }
+
+            if (duplicateBrowserHotkeyDuringAction)
+            {
+                var duplicateCoalesced = logText.Contains(
+                    "duplicate hotkey coalesced",
+                    StringComparison.Ordinal);
+                var noFalseInputChange = !logText.Contains(
+                    "Reason=input-changed-",
+                    StringComparison.Ordinal);
+                var noBusyError = !logText.Contains(
+                    "DiagnosticCode: LF-HK-001",
+                    StringComparison.Ordinal);
+                AppendResult(
+                    $"browser-hotkey:duplicateCoalesced={duplicateCoalesced};" +
+                    $"noFalseInputChange={noFalseInputChange};noBusyError={noBusyError}");
+                if (_exitCode == 0 &&
+                    (!duplicateCoalesced || !noFalseInputChange || !noBusyError))
+                {
+                    _exitCode = 88;
                 }
             }
         }
@@ -6235,6 +6273,7 @@ internal static class Program
             var result = 3;
             var hotkeyEvents = 0;
             long generationAtInitialHotkey = -1;
+            long generationBeforeHotkey = -1;
             keyboardHook.HotkeyPressed += (_, observation) =>
             {
                 if (!observation.Combo.Matches(HotkeyCombo.Parse("Ctrl+F12")))
@@ -6254,16 +6293,18 @@ internal static class Program
                     form.Activate();
                     form.Controls[0].Focus();
                     await Task.Delay(150);
+                    generationBeforeHotkey = keyboardHook.InputGeneration;
                     SendExternalHotkeyWithSuppressedRepeats("Ctrl+F12", 0x7B);
                     await Task.Delay(200);
 
                     var finalGeneration = keyboardHook.InputGeneration;
                     if (hotkeyEvents == 1 &&
-                        generationAtInitialHotkey >= 0 &&
-                        finalGeneration == generationAtInitialHotkey)
+                        generationAtInitialHotkey == generationBeforeHotkey &&
+                        finalGeneration == generationBeforeHotkey)
                     {
                         Console.WriteLine(
-                            "hotkey_repeat=pass repeats=4 dispatched_actions=1 generation_stable=true");
+                            "hotkey_repeat=pass repeats=4 dispatched_actions=1 " +
+                            "handled_hotkey_generation_stable=true");
                         result = 0;
                     }
                     else

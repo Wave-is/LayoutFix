@@ -109,6 +109,47 @@ foreach ($browser in @('edge', 'chrome')) {
     }
 }
 
+# The Chrome support logs that led to v1.0.20 showed a second discrete hotkey
+# arriving while the first contenteditable transaction was still capturing.
+# Keep that exact regression in the release gate: the duplicate must be
+# coalesced and must not invalidate the first action's input ownership.
+for ($iteration = 1; $iteration -le $Runs; $iteration++) {
+    for ($attempt = 1; $attempt -le $maximumAttempts; $attempt++) {
+        if (Test-Path $resultPath) {
+            Remove-Item -LiteralPath $resultPath -Force
+        }
+        $previousDiagnostics = [Environment]::GetEnvironmentVariable(
+            'LAYOUTFIX_E2E_DIAGNOSTICS',
+            'Process')
+        $env:LAYOUTFIX_E2E_DIAGNOSTICS = '1'
+        try {
+            & $harness '--chrome-test' 'contenteditable' 'duplicate'
+            $exitCode = $LASTEXITCODE
+        } finally {
+            if ($null -eq $previousDiagnostics) {
+                Remove-Item Env:LAYOUTFIX_E2E_DIAGNOSTICS -ErrorAction SilentlyContinue
+            } else {
+                $env:LAYOUTFIX_E2E_DIAGNOSTICS = $previousDiagnostics
+            }
+        }
+        if ($exitCode -eq 0) {
+            Remove-IsolatedBrowserProfiles
+            break
+        }
+
+        $details = if (Test-Path $resultPath) {
+            Get-Content $resultPath -Raw
+        } else {
+            'The harness did not create a result log.'
+        }
+        Remove-IsolatedBrowserProfiles
+        if ($attempt -eq $maximumAttempts) {
+            throw "chrome contenteditable duplicate iteration $iteration/$Runs failed on attempt $attempt/$maximumAttempts with exit code $exitCode.`n$details"
+        }
+        Write-Warning "chrome contenteditable duplicate iteration $iteration/$Runs attempt $attempt/$maximumAttempts failed with exit code $exitCode; retrying with a fresh isolated profile."
+    }
+}
+
 $profileLeaks = @(
     Get-ChildItem `
         -LiteralPath $temporaryRoot `
@@ -122,4 +163,4 @@ if ($profileLeaks.Count -ne 0) {
     throw "Browser compatibility E2E left isolated profiles: $($profileLeaks.FullName -join ', ')"
 }
 
-Write-Output "browser_compatibility=pass edge_runs=$Runs chrome_runs=$Runs targets=input,textarea,contenteditable"
+Write-Output "browser_compatibility=pass edge_runs=$Runs chrome_runs=$Runs targets=input,textarea,contenteditable chrome_duplicate_contenteditable=$Runs"

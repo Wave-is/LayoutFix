@@ -75,7 +75,11 @@ public sealed class TextTransactionService : ITextTransactionService
             await _input.WaitForModifiersReleaseAsync();
             if (InputChanged(captureInputGeneration))
             {
-                LogSupportDiagnostic(captureId, "capture", "rejected", "input-changed-after-modifier-release");
+                LogInputChanged(
+                    captureId,
+                    "capture",
+                    "input-changed-after-modifier-release",
+                    captureInputGeneration);
                 return null;
             }
             if (!_activeWindow.IsSameActiveWindow(window))
@@ -119,7 +123,11 @@ public sealed class TextTransactionService : ITextTransactionService
                     }
                     if (InputChanged(captureInputGeneration))
                     {
-                        LogSupportDiagnostic(captureId, "capture", "rejected", "input-changed-after-direct-capture");
+                        LogInputChanged(
+                            captureId,
+                            "capture",
+                            "input-changed-after-direct-capture",
+                            captureInputGeneration);
                         return null;
                     }
                     if (!_activeWindow.IsSameActiveWindow(window))
@@ -189,7 +197,11 @@ public sealed class TextTransactionService : ITextTransactionService
 
             if (InputChanged(captureInputGeneration))
             {
-                LogSupportDiagnostic(captureId, "capture", "rejected", "input-changed-after-copy");
+                LogInputChanged(
+                    captureId,
+                    "capture",
+                    "input-changed-after-copy",
+                    captureInputGeneration);
                 return null;
             }
             if (!_activeWindow.IsSameActiveWindow(window))
@@ -258,7 +270,11 @@ public sealed class TextTransactionService : ITextTransactionService
         }
         if (InputChanged(selectionInputGeneration))
         {
-            LogSupportDiagnostic(captureId, "replacement", "rejected", "input-changed-before-replacement");
+            LogInputChanged(
+                captureId,
+                "replacement",
+                "input-changed-before-replacement",
+                selectionInputGeneration);
             return false;
         }
         if (!_activeWindow.IsSameActiveWindow(selection.Window))
@@ -274,7 +290,11 @@ public sealed class TextTransactionService : ITextTransactionService
         }
         if (InputChanged(selectionInputGeneration))
         {
-            LogSupportDiagnostic(captureId, "replacement", "rejected", "input-changed-after-safety-recheck");
+            LogInputChanged(
+                captureId,
+                "replacement",
+                "input-changed-after-safety-recheck",
+                selectionInputGeneration);
             return false;
         }
         if (!_activeWindow.IsSameActiveWindow(selection.Window))
@@ -338,16 +358,28 @@ public sealed class TextTransactionService : ITextTransactionService
                 _logger.LogInfo("Clipboard snapshot restored after replacement verification.");
             }
 
+            var inputChangedDuringVerification = InputChanged(selectionInputGeneration);
             if (!string.Equals(currentSelection, selection.Text, StringComparison.Ordinal) ||
-                InputChanged(selectionInputGeneration) ||
+                inputChangedDuringVerification ||
                 !_activeWindow.IsSameActiveWindow(selection.Window))
             {
                 var reason = !string.Equals(currentSelection, selection.Text, StringComparison.Ordinal)
                     ? "selection-content-changed"
-                    : InputChanged(selectionInputGeneration)
+                    : inputChangedDuringVerification
                         ? "input-changed-during-verification"
                         : "focus-changed-during-verification";
-                LogSupportDiagnostic(captureId, "replacement", "rejected", reason);
+                if (inputChangedDuringVerification)
+                {
+                    LogInputChanged(
+                        captureId,
+                        "replacement",
+                        reason,
+                        selectionInputGeneration);
+                }
+                else
+                {
+                    LogSupportDiagnostic(captureId, "replacement", "rejected", reason);
+                }
                 return false;
             }
 
@@ -548,6 +580,26 @@ public sealed class TextTransactionService : ITextTransactionService
          _keyboardHook!.InputGeneration != expectedGeneration.Keyboard.Value) ||
         (expectedGeneration.Mouse.HasValue &&
          _mouseHook!.InputGeneration != expectedGeneration.Mouse.Value);
+
+    private void LogInputChanged(
+        long captureId,
+        string phase,
+        string reason,
+        InputGenerationSnapshot expectedGeneration)
+    {
+        var expectedKeyboard = expectedGeneration.Keyboard?.ToString(CultureInfo.InvariantCulture) ?? "unavailable";
+        var currentKeyboard = _keyboardHook?.InputGeneration.ToString(CultureInfo.InvariantCulture) ?? "unavailable";
+        var expectedMouse = expectedGeneration.Mouse?.ToString(CultureInfo.InvariantCulture) ?? "unavailable";
+        var currentMouse = _mouseHook?.InputGeneration.ToString(CultureInfo.InvariantCulture) ?? "unavailable";
+        LogSupportDiagnostic(
+            captureId,
+            phase,
+            "rejected",
+            reason,
+            $"ExpectedKeyboardGeneration={expectedKeyboard}; " +
+            $"CurrentKeyboardGeneration={currentKeyboard}; " +
+            $"ExpectedMouseGeneration={expectedMouse}; CurrentMouseGeneration={currentMouse}");
+    }
 
     private void LogCaptureTarget(
         long captureId,
