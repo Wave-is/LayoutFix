@@ -108,11 +108,17 @@ jobs:
             @{ Name = "languages-ru"; Tab = "Languages"; Culture = "ru" },
             @{ Name = "languages-uk"; Tab = "Languages"; Culture = "uk" },
             @{ Name = "hotkeys"; Tab = "Hotkeys" },
+            @{ Name = "hotkeys-ru"; Tab = "Hotkeys"; Culture = "ru" },
+            @{ Name = "hotkeys-uk"; Tab = "Hotkeys"; Culture = "uk" },
             @{ Name = "exceptions"; Tab = "Exceptions" },
             @{ Name = "exceptions-ru"; Tab = "Exceptions"; Culture = "ru" },
             @{ Name = "exceptions-uk"; Tab = "Exceptions"; Culture = "uk" },
             @{ Name = "dictionary"; Tab = "Dictionary" },
+            @{ Name = "dictionary-ru"; Tab = "Dictionary"; Culture = "ru" },
+            @{ Name = "dictionary-uk"; Tab = "Dictionary"; Culture = "uk" },
             @{ Name = "translation"; Tab = "Translate" },
+            @{ Name = "translation-ru"; Tab = "Translate"; Culture = "ru" },
+            @{ Name = "translation-uk"; Tab = "Translate"; Culture = "uk" },
             @{ Name = "about"; Tab = "About" },
             @{ Name = "about-ru"; Tab = "About"; Culture = "ru" },
             @{ Name = "about-uk"; Tab = "About"; Culture = "uk" }
@@ -128,6 +134,8 @@ jobs:
               throw "$($snapshot.Tab) settings snapshot failed with $LASTEXITCODE."
             }
           }
+          & $e2e --tray-icon-snapshot "artifacts\e2e\tray-icons.png"
+          if ($LASTEXITCODE -ne 0) { throw "Tray icon snapshot failed with $LASTEXITCODE." }
 
       - name: Verify isolated translation worker
         shell: pwsh
@@ -251,7 +259,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Published startup recovery E2E failed with $LASTEXITCODE." }
           & $e2e --session-recovery-test "$publish\LayoutFix.exe"
           if ($LASTEXITCODE -ne 0) { throw "Published session recovery E2E failed with $LASTEXITCODE." }
-          $expectedVersion = "1.0.18.0"
+          $expectedVersion = "1.0.19.0"
           $firstPartyBinaries = @(
             "$publish\LayoutFix.exe",
             "$publish\LayoutFix.Core.dll",

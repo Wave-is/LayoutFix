@@ -266,10 +266,15 @@ public class TranslationCoordinatorTests
         await online.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         var disposeTask = Task.Run(coordinator.Dispose);
-        await online.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        // The solution runs three test assemblies concurrently. On a busy
+        // Windows runner the Task.Run continuation can be scheduled after the
+        // old two-second wall-clock budget even though disposal itself is
+        // immediate (the focused test completes in under 1 ms). Keep the same
+        // behavioral assertions while allowing normal runner contention.
+        await online.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
         online.Complete("late result");
-        await disposeTask.WaitAsync(TimeSpan.FromSeconds(2));
-        await transaction.AllCancelled.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await disposeTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await transaction.AllCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Empty(transaction.Replacements);
         Assert.Equal(

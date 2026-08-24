@@ -72,6 +72,10 @@ internal static class Program
                 args[1],
                 args.Length >= 3 ? args[2] : "Dictionary",
                 args.Length >= 4 ? args[3] : null);
+        if (args.Length >= 1 && args[0] == "--settings-preview")
+            return RunSettingsPreview(args.Length >= 2 ? args[1] : "ru");
+        if (args.Length >= 2 && args[0] == "--tray-icon-snapshot")
+            return RunTrayIconSnapshot(args[1]);
         if (args.Length >= 1 && args[0] == "--hotkey-repeat-test")
             return RunSuppressedHotkeyRepeatTest();
         if (args.Length >= 1 && args[0] == "--autostart-registry-test")
@@ -3484,10 +3488,10 @@ internal static class Program
 
                     var firstLayoutCard = Descendants(form)
                         .OfType<CardPanel>()
-                        .FirstOrDefault(card => card.Visible && card.Controls
+                        .FirstOrDefault(card => card.Visible && Descendants(card)
                             .OfType<ToggleSwitch>()
                             .Any());
-                    var firstLayoutToggle = firstLayoutCard?.Controls
+                    var firstLayoutToggle = firstLayoutCard == null ? null : Descendants(firstLayoutCard)
                         .OfType<ToggleSwitch>()
                         .SingleOrDefault();
                     if (firstLayoutToggle == null)
@@ -3707,6 +3711,8 @@ internal static class Program
                     Application.DoEvents();
                 }
 
+                AssertSettingsGeometry(form, tabName);
+
                 var fullOutputPath = Path.GetFullPath(outputPath);
                 Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
                 using var bitmap = new Bitmap(form.ClientSize.Width, form.ClientSize.Height);
@@ -3756,6 +3762,85 @@ internal static class Program
         Application.Run(form);
         try { Directory.Delete(testDirectory, recursive: true); } catch { }
         return result;
+    }
+
+    private static int RunSettingsPreview(string culture)
+    {
+        var testDirectory = Path.Combine(Path.GetTempPath(), $"LayoutFix.SettingsPreview.{Guid.NewGuid():N}");
+        Directory.CreateDirectory(testDirectory);
+        try
+        {
+            var settings = new SettingsService(Path.Combine(testDirectory, "settings.json"));
+            settings.Current.AppTheme = "Dark";
+            settings.Current.BlacklistedProcesses = ["blocked-app.exe"];
+            settings.Current.AutoConversionBlacklistedProcesses =
+                AppSettings.DefaultAutoConversionBlacklistedProcesses.ToList();
+            settings.Current.UserExceptions = ["codex", "openai"];
+            settings.Current.UserAutocorrect = new Dictionary<string, string>
+            {
+                ["teh"] = "the",
+                ["омг"] = "О мой Бог"
+            };
+            settings.Save(settings.Current);
+
+            var logger = new FileLoggerService(settings, Path.Combine(testDirectory, "preview.log"));
+            using var modelDownloadService = new ModelDownloadService();
+            var historyService = new TranslationHistoryService(
+                settings,
+                Path.Combine(testDirectory, "translation-history.json"));
+            var localization = new LocalizationService();
+            localization.SetCulture(culture);
+            using var form = new SettingsForm(
+                settings,
+                new NullAutoStartService(),
+                localization,
+                logger,
+                modelDownloadService,
+                historyService,
+                new InMemoryTranslationCredentialStore());
+            form.Text = "LayoutFix visual QA";
+            Application.Run(form);
+            return 0;
+        }
+        finally
+        {
+            try { Directory.Delete(testDirectory, recursive: true); } catch { }
+        }
+    }
+
+    private static int RunTrayIconSnapshot(string outputPath)
+    {
+        var fullOutputPath = Path.GetFullPath(outputPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
+        using var canvas = new Bitmap(720, 190, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using var graphics = Graphics.FromImage(canvas);
+        graphics.Clear(Color.FromArgb(28, 28, 30));
+        graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+        using var labelFont = new Font("Segoe UI", 10F, FontStyle.Regular);
+        using var labelBrush = new SolidBrush(Color.White);
+        var cases = new[]
+        {
+            (Label: "Manual", Flags: false, Automatic: false, Hooks: true),
+            (Label: "Automatic", Flags: false, Automatic: true, Hooks: true),
+            (Label: "Reconnect", Flags: false, Automatic: false, Hooks: false),
+            (Label: "Flag", Flags: true, Automatic: false, Hooks: true)
+        };
+        for (var index = 0; index < cases.Length; index++)
+        {
+            var item = cases[index];
+            var x = 18 + (index * 174);
+            using var icon = TrayManager.RenderTrayIconBitmap(
+                "RU",
+                item.Flags,
+                item.Automatic,
+                item.Hooks,
+                32);
+            graphics.DrawImageUnscaled(icon, x, 18);
+            graphics.DrawImage(icon, new Rectangle(x, 60, 112, 112));
+            graphics.DrawString(item.Label, labelFont, labelBrush, x + 42, 25);
+        }
+        canvas.Save(fullOutputPath, System.Drawing.Imaging.ImageFormat.Png);
+        return 0;
     }
 
     private static async Task<int> RunWorkerIsolationTestAsync(string applicationPath)
@@ -6206,6 +6291,130 @@ internal static class Program
         finally
         {
             try { Directory.Delete(testDirectory, recursive: true); } catch { }
+        }
+    }
+
+    private static void AssertSettingsGeometry(Form form, string tabName)
+    {
+        Application.DoEvents();
+        var visibleControls = Descendants(form).Where(control => control.Visible).ToArray();
+
+        foreach (var container in visibleControls.Where(control =>
+                     control is TableLayoutPanel or CardPanel))
+        {
+            var client = container.ClientRectangle;
+            foreach (Control child in container.Controls)
+            {
+                if (!child.Visible || child.Width <= 0 || child.Height <= 0)
+                    continue;
+
+                var bounds = container.RectangleToClient(child.RectangleToScreen(child.ClientRectangle));
+                if (bounds.Left < client.Left - 1 || bounds.Top < client.Top - 1 ||
+                    bounds.Right > client.Right + 1 || bounds.Bottom > client.Bottom + 1)
+                {
+                    throw new InvalidOperationException(
+                        $"{tabName}: '{child.AccessibleName ?? child.GetType().Name}' is clipped by " +
+                        $"{container.GetType().Name}: child={bounds}, parent={client}.");
+                }
+            }
+        }
+
+        foreach (var toggle in visibleControls.OfType<ToggleSwitch>())
+        {
+            var parent = toggle.Parent ?? throw new InvalidOperationException(
+                $"{tabName}: a visible toggle has no layout parent.");
+            var bounds = parent.RectangleToClient(toggle.RectangleToScreen(toggle.ClientRectangle));
+            var toggleCenter = bounds.Top + (bounds.Height / 2.0);
+            var rowCenter = parent.ClientSize.Height / 2.0;
+            if (Math.Abs(toggleCenter - rowCenter) > 1.5)
+            {
+                throw new InvalidOperationException(
+                    $"{tabName}: toggle '{toggle.AccessibleName}' is not vertically centered " +
+                    $"(toggle={toggleCenter:0.0}, row={rowCenter:0.0}).");
+            }
+        }
+
+        foreach (var button in visibleControls.OfType<Button>().Where(button =>
+                     !string.IsNullOrWhiteSpace(button.Text)))
+        {
+            var measured = TextRenderer.MeasureText(
+                button.Text,
+                button.Font,
+                Size.Empty,
+                TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+            if (button.ClientSize.Width + 2 < measured.Width + 12)
+            {
+                throw new InvalidOperationException(
+                    $"{tabName}: button '{button.Text}' clips its caption " +
+                    $"(client={button.ClientSize.Width}, required={measured.Width + 12}).");
+            }
+        }
+
+        if (tabName.Equals("General", StringComparison.OrdinalIgnoreCase))
+        {
+            var toggles = visibleControls.OfType<ToggleSwitch>()
+                .Where(toggle => toggle.AccessibleName?.StartsWith("General.", StringComparison.Ordinal) == true)
+                .ToArray();
+            AssertCommonLeftEdge(tabName, "general toggles", toggles);
+
+            foreach (var toggle in toggles)
+            {
+                var label = toggle.Parent?.Controls.OfType<Label>().SingleOrDefault();
+                if (label == null)
+                    throw new InvalidOperationException("General: toggle row label is missing.");
+                var requiredWidth = TextRenderer.MeasureText(
+                    label.Text,
+                    label.Font,
+                    Size.Empty,
+                    TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix).Width;
+                if (label.ClientSize.Width < requiredWidth)
+                {
+                    throw new InvalidOperationException(
+                        $"General: label '{label.Text}' is clipped " +
+                        $"(client={label.ClientSize.Width}, required={requiredWidth}).");
+                }
+            }
+        }
+
+        if (tabName.Equals("Languages", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var card in visibleControls.OfType<CardPanel>())
+            {
+                var cardChildren = Descendants(card).Where(control => control.Visible).ToArray();
+                var toggle = cardChildren.OfType<ToggleSwitch>().Single();
+                var active = cardChildren.OfType<Label>().Single(label =>
+                    label.ForeColor == Color.FromArgb(0, 120, 215));
+                var toggleCenter = toggle.PointToScreen(new Point(0, toggle.Height / 2)).Y;
+                var activeCenter = active.PointToScreen(new Point(0, active.Height / 2)).Y;
+                if (Math.Abs(toggleCenter - activeCenter) > 2)
+                    throw new InvalidOperationException("Languages: active status and toggle are not centered.");
+            }
+        }
+
+        if (tabName.Equals("Translate", StringComparison.OrdinalIgnoreCase))
+        {
+            var toggles = visibleControls.OfType<ToggleSwitch>()
+                .Where(toggle => toggle.AccessibleName?.StartsWith("Translation.", StringComparison.Ordinal) == true)
+                .ToArray();
+            AssertCommonLeftEdge(tabName, "translation toggles", toggles);
+
+            var languageCombos = visibleControls.OfType<ComboBox>()
+                .Where(combo => combo.AccessibleName?.StartsWith("Translation.Language", StringComparison.Ordinal) == true)
+                .ToArray();
+            AssertCommonLeftEdge(tabName, "translation language selectors", languageCombos);
+        }
+    }
+
+    private static void AssertCommonLeftEdge(string tabName, string groupName, IReadOnlyCollection<Control> controls)
+    {
+        if (controls.Count < 2)
+            throw new InvalidOperationException($"{tabName}: {groupName} are missing.");
+
+        var leftEdges = controls.Select(control => control.PointToScreen(Point.Empty).X).ToArray();
+        if (leftEdges.Max() - leftEdges.Min() > 1)
+        {
+            throw new InvalidOperationException(
+                $"{tabName}: {groupName} do not share one column ({string.Join(",", leftEdges)}).");
         }
     }
 

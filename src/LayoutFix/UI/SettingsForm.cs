@@ -85,16 +85,10 @@ public class SettingsForm : Form
 
     private void InitializeComponent()
     {
-        // This form's whole layout is hand-placed pixel coordinates (Location,
-        // row-spacing increments like "y += 40", fixed widths) with no
-        // Designer-generated baseline. The app is PerMonitorV2 DPI-aware, so
-        // at DPI above 100% GDI+ renders every label's text taller/wider in
-        // device pixels while these literal pixel budgets stay identical,
-        // which is exactly the overlap reported at 150% scaling. AutoScaleMode
-        // = Dpi with an explicit 96 DPI baseline makes WinForms scale the
-        // entire built control tree (locations, sizes, fonts) by the real
-        // monitor-DPI ratio in one pass, which keeps every hand-tuned margin
-        // proportionally correct at any scale factor.
+        // PerMonitorV2 scales the form for the active monitor. Content inside
+        // every tab is laid out by containers rather than sibling coordinates,
+        // so translated text and 125-200% Windows scaling cannot move one
+        // control over another.
         this.AutoScaleMode = AutoScaleMode.Dpi;
         this.AutoScaleDimensions = new SizeF(96F, 96F);
         this.Text = _locService.GetString("Settings_Title", "LayoutFix");
@@ -108,15 +102,23 @@ public class SettingsForm : Form
         _pnlTopBar = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = Color.Transparent };
         _pnlTopBar.MouseDown += PnlTopBar_MouseDown;
         
-        var lblTitle = new Label { Text = "LayoutFix", ForeColor = _textColor, Font = new Font("Segoe UI", 12F, FontStyle.Bold), AutoSize = true, Location = new Point(20, 10) };
+        var lblTitle = new Label
+        {
+            Text = "LayoutFix",
+            ForeColor = _textColor,
+            Font = new Font("Segoe UI", 12F, FontStyle.Bold),
+            Dock = DockStyle.Fill,
+            Padding = new Padding(20, 0, 0, 0),
+            TextAlign = ContentAlignment.MiddleLeft
+        };
         lblTitle.MouseDown += PnlTopBar_MouseDown;
 
         var btnClose = new Button { Text = "✕", ForeColor = _textColor, FlatStyle = FlatStyle.Flat, Dock = DockStyle.Right, Width = 40, Cursor = Cursors.Hand };
         btnClose.FlatAppearance.BorderSize = 0;
         btnClose.Click += (s, e) => this.Close();
 
-        _pnlTopBar.Controls.Add(lblTitle);
         _pnlTopBar.Controls.Add(btnClose);
+        _pnlTopBar.Controls.Add(lblTitle);
 
         _pnlSidebar = new Panel
         {
@@ -255,9 +257,12 @@ public class SettingsForm : Form
                 else ts.BackColor = _bgColor;
                 ts.Invalidate();
             }
-            else if (c is Label lbl && lbl.ForeColor != _accentColor)
+            else if (c is Label lbl &&
+                     lbl.ForeColor != _accentColor &&
+                     lbl.ForeColor != Color.Gray &&
+                     lbl.ForeColor != Color.Orange)
             {
-                lbl.ForeColor = lbl.Font.Bold ? _textColor : (lbl.Text.StartsWith("Keyboard:") || lbl.Text.StartsWith("v1.0") ? Color.Gray : _textColor);
+                lbl.ForeColor = _textColor;
             }
             else if (c is Button btn)
             {
@@ -289,11 +294,22 @@ public class SettingsForm : Form
             else if (c is TableLayoutPanel tlp)
             {
                 tlp.ForeColor = _textColor;
-                tlp.BackColor = _bgColor;
+                tlp.BackColor = HasAncestor<CardPanel>(tlp) ? Color.Transparent : _bgColor;
             }
 
             if (c.HasChildren) UpdateThemeRecursive(c);
         }
+    }
+
+    private static bool HasAncestor<T>(Control control) where T : Control
+    {
+        for (var parent = control.Parent; parent != null; parent = parent.Parent)
+        {
+            if (parent is T)
+                return true;
+        }
+
+        return false;
     }
 
     private bool IsSystemDarkTheme()
@@ -401,25 +417,48 @@ public class SettingsForm : Form
 
     private void BuildGeneralTab()
     {
-        var pnl = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+        var viewport = CreateSettingsViewport(out var stack);
+        AddStackRow(stack, CreatePageTitle(_locService.GetString("Settings_General", "App Settings")), 12);
 
-        int y = 0;
-        var lblTitle = new Label { Text = _locService.GetString("Settings_General", "App Settings"), ForeColor = _textColor, Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Location = new Point(0, y) };
-        pnl.Controls.Add(lblTitle);
-        y += 50;
+        AddStackRow(stack, CreateToggleSetting(
+            _locService.GetString("Settings_AutoConv", "Enable automatic correction while typing"),
+            _currentSettings.AutoConversionEnabled,
+            v => { _currentSettings.AutoConversionEnabled = v; SaveSettings(); },
+            "General.AutoCorrection"));
+        AddStackRow(stack, CreateToggleSetting(
+            _locService.GetString("Settings_AutoStart", "Start with Windows"),
+            _currentSettings.AutoStart,
+            v => { _currentSettings.AutoStart = v; SaveSettings(); },
+            "General.AutoStart"));
+        AddStackRow(stack, CreateToggleSetting(
+            _locService.GetString("Settings_Sound", "Enable sound notifications"),
+            _currentSettings.SoundEnabled,
+            v => { _currentSettings.SoundEnabled = v; SaveSettings(); },
+            "General.Sound"));
+        AddStackRow(stack, CreateToggleSetting(
+            _locService.GetString("Settings_Notifications", "Show diagnostic popup messages (LF-... codes)"),
+            _currentSettings.NotificationsEnabled,
+            v => { _currentSettings.NotificationsEnabled = v; SaveSettings(); },
+            "General.Notifications"));
+        AddStackRow(stack, CreateToggleSetting(
+            _locService.GetString("Settings_Flags", "Use country flags in tray"),
+            _currentSettings.UseFlagIcons,
+            v => { _currentSettings.UseFlagIcons = v; SaveSettings(); },
+            "General.Flags"));
+        AddStackRow(stack, CreateToggleSetting(
+            _locService.GetString("Settings_Logging", "Diagnostic logs for testing (include application name)"),
+            _currentSettings.LoggingEnabled,
+            v => { _currentSettings.LoggingEnabled = v; SaveSettings(); },
+            "General.Logging"));
 
-        pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_AutoConv", "Enable automatic correction while typing"), _currentSettings.AutoConversionEnabled, v => { _currentSettings.AutoConversionEnabled = v; SaveSettings(); }, y)); y += 50;
-        pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_AutoStart", "Start with Windows"), _currentSettings.AutoStart, v => { _currentSettings.AutoStart = v; SaveSettings(); }, y)); y += 50;
-        pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_Sound", "Enable sound notifications"), _currentSettings.SoundEnabled, v => { _currentSettings.SoundEnabled = v; SaveSettings(); }, y)); y += 50;
-        pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_Notifications", "Show diagnostic popup messages (LF-... codes)"), _currentSettings.NotificationsEnabled, v => { _currentSettings.NotificationsEnabled = v; SaveSettings(); }, y)); y += 50;
-        pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_Flags", "Use country flags in tray"), _currentSettings.UseFlagIcons, v => { _currentSettings.UseFlagIcons = v; SaveSettings(); }, y)); y += 50;
-        pnl.Controls.Add(CreateToggleSetting(_locService.GetString("Settings_Logging", "Diagnostic logs for testing (include application name)"), _currentSettings.LoggingEnabled, v => { _currentSettings.LoggingEnabled = v; SaveSettings(); }, y)); y += 50;
-
-        var lblTheme = new Label { Text = _locService.GetString("Settings_Theme", "Color theme"), ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
-        MeasureNow(lblTheme);
-        int themeComboX = Math.Max(lblTheme.Right + 24, MinSettingsRowWidth - 150);
-        var cmbTheme = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(themeComboX, 8), BackColor = _sidebarColor, ForeColor = _textColor };
-        var pnlTheme = new Panel { Width = Math.Max(MinSettingsRowWidth, themeComboX + cmbTheme.Width), Height = 40, Location = new Point(0, y) };
+        var cmbTheme = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Width = 170,
+            BackColor = _sidebarColor,
+            ForeColor = _textColor,
+            AccessibleName = "General.Theme"
+        };
         cmbTheme.Items.AddRange(new[]
         {
             _locService.GetString("Settings_ThemeAuto", "Follow Windows"),
@@ -433,17 +472,19 @@ public class SettingsForm : Form
             SaveSettings();
             ApplyTheme();
         };
+        AddStackRow(stack, CreateControlSettingRow(
+            _locService.GetString("Settings_Theme", "Color theme"),
+            cmbTheme,
+            "General.ThemeRow"));
 
-        pnlTheme.Controls.Add(lblTheme);
-        pnlTheme.Controls.Add(cmbTheme);
-        pnl.Controls.Add(pnlTheme);
-        y += 50;
-
-        var lblLang = new Label { Text = _locService.GetString("Settings_InterfaceLanguage", "Interface language"), ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
-        MeasureNow(lblLang);
-        int langComboX = Math.Max(lblLang.Right + 24, MinSettingsRowWidth - 150);
-        var cmbLang = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(langComboX, 8), BackColor = _sidebarColor, ForeColor = _textColor };
-        var pnlLang = new Panel { Width = Math.Max(MinSettingsRowWidth, langComboX + cmbLang.Width), Height = 40, Location = new Point(0, y) };
+        var cmbLang = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Width = 170,
+            BackColor = _sidebarColor,
+            ForeColor = _textColor,
+            AccessibleName = "General.InterfaceLanguage"
+        };
 
         var locales = new LangItem[] {
             new LangItem{ Code="en", Name="English" }, new LangItem{ Code="ru", Name="Русский" }, new LangItem{ Code="uk", Name="Українська" },
@@ -471,48 +512,116 @@ public class SettingsForm : Form
             }
         };
 
-        pnlLang.Controls.Add(lblLang);
-        pnlLang.Controls.Add(cmbLang);
-        pnl.Controls.Add(pnlLang);
+        AddStackRow(stack, CreateControlSettingRow(
+            _locService.GetString("Settings_InterfaceLanguage", "Interface language"),
+            cmbLang,
+            "General.InterfaceLanguageRow"));
 
-        _tabGeneral.Controls.Add(pnl);
+        _tabGeneral.Controls.Add(viewport);
     }
 
-    // The toggle is positioned relative to the label's actual rendered width
-    // (not a hardcoded X) so longer translations never overlap or get hidden
-    // behind the switch. The row itself grows to fit both, so nothing is
-    // silently clipped by the parent's bounds either.
-    private const int MinSettingsRowWidth = 740;
+    private const int SettingsControlColumnWidth = 190;
 
-    // AutoSize controls report a placeholder 100x23 size until they are
-    // parented (or otherwise laid out); reading .Right/.Bottom right after
-    // construction — as every "position sibling relative to this label"
-    // fix below does — would silently use that placeholder instead of the
-    // real rendered size. Forcing GetPreferredSize makes it correct
-    // regardless of parenting order or timing.
     private static void MeasureNow(Control control) => control.Size = control.GetPreferredSize(Size.Empty);
 
-    private Panel CreateToggleSetting(string title, bool initialValue, Action<bool> onChanged, int y)
+    private Panel CreateSettingsViewport(out TableLayoutPanel stack)
     {
-        var lbl = new Label { Text = title, ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
-        MeasureNow(lbl);
-        int switchX = Math.Max(lbl.Right + 24, MinSettingsRowWidth - 50);
-        var sw = new ToggleSwitch { Checked = initialValue, Location = new Point(switchX, 5), BackColor = _bgColor };
-        sw.CheckedChanged += (s, e) => onChanged(sw.Checked);
+        stack = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1,
+            RowCount = 0,
+            GrowStyle = TableLayoutPanelGrowStyle.AddRows,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            BackColor = _bgColor
+        };
+        stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
-        var pnl = new Panel { Width = Math.Max(MinSettingsRowWidth, switchX + sw.Width + 10), Height = 40, Location = new Point(0, y) };
-        pnl.Controls.Add(lbl);
-        pnl.Controls.Add(sw);
-        return pnl;
+        var viewport = new Panel
+        {
+            Dock = DockStyle.Fill,
+            AutoScroll = true,
+            BackColor = _bgColor
+        };
+        viewport.Controls.Add(stack);
+        return viewport;
+    }
+
+    private static void AddStackRow(TableLayoutPanel stack, Control control, int bottomMargin = 4)
+    {
+        var row = stack.RowCount++;
+        stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        control.Dock = DockStyle.Top;
+        control.Margin = new Padding(0, 0, 0, bottomMargin);
+        stack.Controls.Add(control, 0, row);
+    }
+
+    private Label CreatePageTitle(string text) => new()
+    {
+        Text = text,
+        ForeColor = _textColor,
+        Font = new Font("Segoe UI", 18F, FontStyle.Bold),
+        AutoSize = true
+    };
+
+    private TableLayoutPanel CreateControlSettingRow(string title, Control control, string accessibleName)
+    {
+        var row = new TableLayoutPanel
+        {
+            Height = 44,
+            MinimumSize = new Size(0, 44),
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            BackColor = _bgColor,
+            AccessibleName = accessibleName
+        };
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, SettingsControlColumnWidth));
+        row.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+
+        var label = new Label
+        {
+            Text = title,
+            ForeColor = _textColor,
+            Font = new Font("Segoe UI", 12F),
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            AutoEllipsis = false,
+            Margin = Padding.Empty
+        };
+        control.Anchor = AnchorStyles.None;
+        control.Margin = Padding.Empty;
+        row.Controls.Add(label, 0, 0);
+        row.Controls.Add(control, 1, 0);
+        return row;
+    }
+
+    private TableLayoutPanel CreateToggleSetting(
+        string title,
+        bool initialValue,
+        Action<bool> onChanged,
+        string accessibleName)
+    {
+        var sw = new ToggleSwitch
+        {
+            Checked = initialValue,
+            BackColor = _bgColor,
+            AccessibleName = accessibleName + ".Toggle"
+        };
+        sw.CheckedChanged += (s, e) => onChanged(sw.Checked);
+        return CreateControlSettingRow(title, sw, accessibleName);
     }
 
     private void BuildLanguagesTab()
     {
-        var pnl = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
-
-        var lblTitle = new Label { Text = _locService.GetString("Settings_Languages", "Language & Keyboard Layouts"), ForeColor = _textColor, Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Location = new Point(0, 0) };
-        
-        pnl.Controls.Add(lblTitle);
+        var viewport = CreateSettingsViewport(out var stack);
+        AddStackRow(stack, CreatePageTitle(
+            _locService.GetString("Settings_Languages", "Language & Keyboard Layouts")), 12);
 
         var activeKeyboardLayoutIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
@@ -537,8 +646,6 @@ public class SettingsForm : Form
         }
         catch { }
 
-        int y = 50;
-
         var useWindowsLayouts = CreateToggleSetting(
             _locService.GetString(
                 "Settings_UseWindowsLayouts",
@@ -549,9 +656,8 @@ public class SettingsForm : Form
                 _currentSettings.UseWindowsLayoutList = value;
                 SaveSettings();
             },
-            y);
-        pnl.Controls.Add(useWindowsLayouts);
-        y += 50;
+            "Languages.UseWindowsLayouts");
+        AddStackRow(stack, useWindowsLayouts, 8);
 
         foreach (InputLanguage lang in InputLanguage.InstalledInputLanguages)
         {
@@ -580,12 +686,72 @@ public class SettingsForm : Form
                 layout,
                 _currentSettings.DisabledLanguages);
 
-            var card = new CardPanel { Width = 500, Height = 70, Location = new Point(0, y) };
-            
-            var lblName = new Label { Text = name, ForeColor = _textColor, Font = new Font("Segoe UI", 12, FontStyle.Bold), AutoSize = true, Location = new Point(60, 15), BackColor = Color.Transparent };
-            var lblLayout = new Label { Text = _locService.GetString("Settings_KeyboardPrefix", "Keyboard:") + " " + lang.LayoutName, ForeColor = Color.Gray, Font = new Font("Segoe UI", 9), AutoSize = true, Location = new Point(60, 38), BackColor = Color.Transparent };
+            var card = new CardPanel
+            {
+                Height = 76,
+                MinimumSize = new Size(0, 76),
+                Padding = new Padding(12, 8, 12, 8),
+                AccessibleName = "Languages.LayoutCard." + handleHex
+            };
+            var cardLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 4,
+                RowCount = 1,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty,
+                BackColor = Color.Transparent
+            };
+            cardLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 44));
+            cardLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            cardLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
+            cardLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 64));
+            cardLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
-            var sw = new ToggleSwitch { Checked = isActive, Location = new Point(430, 22), BackColor = card.CardBackColor };
+            var textLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 2,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty,
+                BackColor = Color.Transparent
+            };
+            textLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 58F));
+            textLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 42F));
+            var lblName = new Label
+            {
+                Text = name,
+                ForeColor = _textColor,
+                Font = new Font("Segoe UI", 12F, FontStyle.Bold),
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.BottomLeft,
+                AutoEllipsis = true,
+                Margin = Padding.Empty,
+                BackColor = Color.Transparent
+            };
+            var lblLayout = new Label
+            {
+                Text = _locService.GetString("Settings_KeyboardPrefix", "Keyboard:") + " " + lang.LayoutName,
+                ForeColor = Color.Gray,
+                Font = new Font("Segoe UI", 9F),
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.TopLeft,
+                AutoEllipsis = true,
+                Margin = Padding.Empty,
+                BackColor = Color.Transparent
+            };
+            textLayout.Controls.Add(lblName, 0, 0);
+            textLayout.Controls.Add(lblLayout, 0, 1);
+
+            var sw = new ToggleSwitch
+            {
+                Checked = isActive,
+                Anchor = AnchorStyles.None,
+                Margin = Padding.Empty,
+                BackColor = card.CardBackColor,
+                AccessibleName = "Languages.LayoutToggle." + handleHex
+            };
             sw.CheckedChanged += (s, e) =>
             {
                 if (sw.Checked)
@@ -595,17 +761,40 @@ public class SettingsForm : Form
                 SaveSettings();
             };
 
-            var lblActive = new Label { Text = _locService.GetString("Settings_Active", "Active"), ForeColor = _accentColor, Font = new Font("Segoe UI", 10), AutoSize = true, Location = new Point(370, 25), BackColor = Color.Transparent };
+            var lblActive = new Label
+            {
+                Text = _locService.GetString("Settings_Active", "Active"),
+                ForeColor = _accentColor,
+                Font = new Font("Segoe UI", 10F),
+                AutoSize = true,
+                Anchor = AnchorStyles.None,
+                Margin = Padding.Empty,
+                BackColor = Color.Transparent
+            };
             
             string isoCode = lang.Culture?.TwoLetterISOLanguageName.ToUpperInvariant() ?? "??";
-            var pnlFlag = new Label { Text = isoCode, Width = 34, Height = 22, Location = new Point(15, 24), BackColor = _accentColor, ForeColor = Color.White, Font = new Font("Segoe UI", 9, FontStyle.Bold), TextAlign = ContentAlignment.MiddleCenter };
+            var pnlFlag = new Label
+            {
+                Text = isoCode,
+                Width = 34,
+                Height = 24,
+                Anchor = AnchorStyles.None,
+                Margin = Padding.Empty,
+                BackColor = _accentColor,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleCenter
+            };
 
-            card.Controls.AddRange(new Control[] { pnlFlag, lblName, lblLayout, lblActive, sw });
-            pnl.Controls.Add(card);
-            y += 80;
+            cardLayout.Controls.Add(pnlFlag, 0, 0);
+            cardLayout.Controls.Add(textLayout, 1, 0);
+            cardLayout.Controls.Add(lblActive, 2, 0);
+            cardLayout.Controls.Add(sw, 3, 0);
+            card.Controls.Add(cardLayout);
+            AddStackRow(stack, card, 10);
         }
 
-        _tabLanguages.Controls.Add(pnl);
+        _tabLanguages.Controls.Add(viewport);
     }
 
     private void BuildHotkeysTab()
@@ -812,8 +1001,9 @@ public class SettingsForm : Form
             Text = _locService.GetString("Settings_Exceptions", "App Exceptions"),
             ForeColor = _textColor,
             Font = new Font("Segoe UI", 18, FontStyle.Bold),
-            AutoSize = true,
-            Location = new Point(0, 6)
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = Padding.Empty
         };
 
         var layout = new TableLayoutPanel
@@ -825,12 +1015,9 @@ public class SettingsForm : Form
             Padding = Padding.Empty
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 58));
-
-        var titlePanel = new Panel { Dock = DockStyle.Fill };
-        titlePanel.Controls.Add(lblTitle);
 
         var allActionsPanel = CreateProcessExceptionEditor(
             _locService.GetString("Settings_AllActionsExclusions", "All LayoutFix actions"),
@@ -852,7 +1039,7 @@ public class SettingsForm : Form
             includeRestoreDefaults: true,
             out _lstAutoConversionExceptions);
 
-        layout.Controls.Add(titlePanel, 0, 0);
+        layout.Controls.Add(lblTitle, 0, 0);
         layout.Controls.Add(allActionsPanel, 0, 1);
         layout.Controls.Add(autoCorrectionPanel, 0, 2);
         _tabExceptions.Controls.Add(layout);
@@ -876,34 +1063,46 @@ public class SettingsForm : Form
         var lblSectionTitle = new Label
         {
             Text = title,
-            Dock = DockStyle.Top,
-            Height = 28,
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            Margin = new Padding(0, 0, 0, 3),
             ForeColor = _textColor,
             Font = new Font("Segoe UI", 11, FontStyle.Bold)
         };
         var lblDescription = new Label
         {
             Text = description,
-            Dock = DockStyle.Top,
-            Height = 38,
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            Margin = new Padding(0, 0, 0, 8),
             ForeColor = Color.Gray,
             Font = new Font("Segoe UI", 9)
         };
-        var actions = new FlowLayoutPanel
+        var actions = new TableLayoutPanel
         {
-            Dock = DockStyle.Bottom,
-            Height = 38,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-            Padding = new Padding(0, 5, 0, 0),
-            Margin = Padding.Empty
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 3,
+            RowCount = includeRestoreDefaults ? 2 : 1,
+            Padding = Padding.Empty,
+            Margin = new Padding(0, 8, 0, 0),
+            AccessibleName = accessiblePrefix + ".Actions"
         };
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        actions.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        if (includeRestoreDefaults)
+            actions.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         var txtAdd = new TextBox
         {
-            Width = includeRestoreDefaults ? 190 : 300,
+            Dock = DockStyle.Fill,
+            MinimumSize = new Size(120, 0),
             BackColor = _sidebarColor,
             ForeColor = _textColor,
             Font = new Font("Segoe UI", 10),
+            Margin = new Padding(0, 3, 8, 3),
             AccessibleName = accessiblePrefix + ".Input"
         };
         var btnAdd = CreateExceptionButton(
@@ -960,7 +1159,9 @@ public class SettingsForm : Form
             SaveSettings();
         };
 
-        actions.Controls.AddRange([txtAdd, btnAdd, btnRemove]);
+        actions.Controls.Add(txtAdd, 0, 0);
+        actions.Controls.Add(btnAdd, 1, 0);
+        actions.Controls.Add(btnRemove, 2, 0);
         if (includeRestoreDefaults)
         {
             var btnRestore = CreateExceptionButton(
@@ -968,6 +1169,8 @@ public class SettingsForm : Form
                 Color.FromArgb(72, 72, 76),
                 accessiblePrefix + ".RestoreDefaults",
                 width: 240);
+            btnRestore.Anchor = AnchorStyles.Left;
+            btnRestore.Margin = new Padding(0, 5, 0, 0);
             btnRestore.Click += (_, _) =>
             {
                 var changed = false;
@@ -984,13 +1187,29 @@ public class SettingsForm : Form
                 if (changed)
                     SaveSettings();
             };
-            actions.Controls.Add(btnRestore);
+            actions.Controls.Add(btnRestore, 0, 1);
+            actions.SetColumnSpan(btnRestore, 3);
         }
 
-        panel.Controls.Add(editorList);
-        panel.Controls.Add(actions);
-        panel.Controls.Add(lblDescription);
-        panel.Controls.Add(lblSectionTitle);
+        var editorLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 4,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        editorLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        editorLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        editorLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        editorLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        editorLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        editorList.Margin = Padding.Empty;
+        editorLayout.Controls.Add(lblSectionTitle, 0, 0);
+        editorLayout.Controls.Add(lblDescription, 0, 1);
+        editorLayout.Controls.Add(editorList, 0, 2);
+        editorLayout.Controls.Add(actions, 0, 3);
+        panel.Controls.Add(editorLayout);
         return panel;
     }
 
@@ -1011,7 +1230,8 @@ public class SettingsForm : Form
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat,
             AccessibleName = accessibleName,
-            Margin = new Padding(5, 0, 0, 0)
+            Margin = new Padding(5, 0, 0, 0),
+            Anchor = AnchorStyles.None
         };
         button.FlatAppearance.BorderSize = 0;
         return button;
@@ -1023,7 +1243,15 @@ public class SettingsForm : Form
     private void BuildDictionaryTab()
     {
         var pnl = new Panel { Dock = DockStyle.Fill };
-        var lblTitle = new Label { Text = _locService.GetString("Settings_Dict", "Dictionary"), ForeColor = _textColor, Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Dock = DockStyle.Top };
+        var lblTitle = new Label
+        {
+            Text = _locService.GetString("Settings_Dict", "Dictionary"),
+            ForeColor = _textColor,
+            Font = new Font("Segoe UI", 18, FontStyle.Bold),
+            Dock = DockStyle.Top,
+            Height = 58,
+            TextAlign = ContentAlignment.MiddleLeft
+        };
 
         var columns = new TableLayoutPanel
         {
@@ -1040,15 +1268,16 @@ public class SettingsForm : Form
             Dock = DockStyle.Fill,
             ForeColor = _textColor,
             Font = new Font("Segoe UI", 11),
-            Padding = new Padding(10)
+            Padding = new Padding(10),
+            Margin = new Padding(0, 0, 6, 0)
         };
         var exceptionsPanel = new Panel { Dock = DockStyle.Fill };
-        var pnlAdd = new TableLayoutPanel { Dock = DockStyle.Top, Height = 42, ColumnCount = 3 };
+        var pnlAdd = new TableLayoutPanel { Dock = DockStyle.Top, Height = 50, ColumnCount = 3 };
         pnlAdd.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         pnlAdd.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 48));
         pnlAdd.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 48));
-        _txtAddDict = new TextBox { Dock = DockStyle.Fill, Margin = new Padding(0, 9, 6, 3), BackColor = _sidebarColor, ForeColor = _textColor, Font = new Font("Segoe UI", 11) };
-        var btnAdd = new Button { Text = "+", Dock = DockStyle.Fill, Margin = new Padding(0, 8, 6, 4), BackColor = _accentColor, ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        _txtAddDict = new TextBox { Dock = DockStyle.Fill, Margin = new Padding(0, 6, 6, 6), BackColor = _sidebarColor, ForeColor = _textColor, Font = new Font("Segoe UI", 11) };
+        var btnAdd = new Button { Text = "+", Dock = DockStyle.Fill, Margin = new Padding(0, 5, 6, 5), BackColor = _accentColor, ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
         btnAdd.FlatAppearance.BorderSize = 0;
         
         btnAdd.Click += (s, e) =>
@@ -1063,7 +1292,7 @@ public class SettingsForm : Form
             }
         };
 
-        var btnRemove = new Button { Text = "−", Dock = DockStyle.Fill, Margin = new Padding(0, 8, 0, 4), BackColor = Color.FromArgb(200, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        var btnRemove = new Button { Text = "−", Dock = DockStyle.Fill, Margin = new Padding(0, 5, 0, 5), BackColor = Color.FromArgb(200, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
         btnRemove.FlatAppearance.BorderSize = 0;
         btnRemove.Click += (s, e) =>
         {
@@ -1095,7 +1324,8 @@ public class SettingsForm : Form
             Dock = DockStyle.Fill,
             ForeColor = _textColor,
             Font = new Font("Segoe UI", 11),
-            Padding = new Padding(10)
+            Padding = new Padding(10),
+            Margin = new Padding(6, 0, 0, 0)
         };
         var autocorrectPanel = new Panel { Dock = DockStyle.Fill };
         var autocorrectAddPanel = new TableLayoutPanel
@@ -1107,7 +1337,7 @@ public class SettingsForm : Form
         };
         autocorrectAddPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         autocorrectAddPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        autocorrectAddPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
+        autocorrectAddPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
         var sourceLabel = new Label
         {
@@ -1132,7 +1362,10 @@ public class SettingsForm : Form
             BackColor = _accentColor,
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat,
-            Margin = new Padding(6, 3, 0, 3)
+            Margin = new Padding(8, 3, 0, 3),
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowOnly,
+            MinimumSize = new Size(112, 0)
         };
         addReplacement.FlatAppearance.BorderSize = 0;
         autocorrectAddPanel.Controls.Add(sourceLabel, 0, 0);
@@ -1226,13 +1459,9 @@ public class SettingsForm : Form
 
     private void BuildTranslateTab()
     {
-        var pnl = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
-
-        int y = 0;
-        var lblTitle = new Label { Text = _locService.GetString("Settings_Translate", "Auto-Translate"), ForeColor = _textColor, Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Location = new Point(0, y) };
-        MeasureNow(lblTitle);
-        pnl.Controls.Add(lblTitle);
-        y = lblTitle.Bottom + 10;
+        var viewport = CreateSettingsViewport(out var stack);
+        AddStackRow(stack, CreatePageTitle(
+            _locService.GetString("Settings_Translate", "Auto-Translate")), 8);
 
         var lblNote = new Label
         {
@@ -1240,13 +1469,10 @@ public class SettingsForm : Form
             ForeColor = Color.Orange,
             Font = new Font("Segoe UI", 10, FontStyle.Italic),
             AutoSize = true,
-            MaximumSize = new Size(800, 0),
-            Location = new Point(0, y),
+            MaximumSize = new Size(860, 0),
             AccessibleName = "Translation.OnlinePrivacyNote"
         };
-        MeasureNow(lblNote);
-        pnl.Controls.Add(lblNote);
-        y = lblNote.Bottom + 12;
+        AddStackRow(stack, lblNote, 10);
 
         var hasTranslationCredential = false;
         try
@@ -1257,7 +1483,7 @@ public class SettingsForm : Form
         {
             _logger.LogError("Failed to inspect the translation API credential", exception);
         }
-        Panel? onlineSetting = null;
+        TableLayoutPanel? onlineSetting = null;
 
         var credentialLabel = new Label
         {
@@ -1265,13 +1491,14 @@ public class SettingsForm : Form
             ForeColor = _textColor,
             Font = new Font("Segoe UI", 10F),
             AutoSize = true,
-            Location = new Point(0, 9)
+            Anchor = AnchorStyles.Left,
+            Margin = Padding.Empty
         };
-        MeasureNow(credentialLabel);
         var credentialInput = new TextBox
         {
-            Width = 260,
-            Location = new Point(credentialLabel.Right + 15, 5),
+            Dock = DockStyle.Fill,
+            MinimumSize = new Size(180, 0),
+            Margin = new Padding(12, 7, 12, 7),
             UseSystemPasswordChar = true,
             MaxLength = 256,
             PlaceholderText = hasTranslationCredential
@@ -1284,38 +1511,44 @@ public class SettingsForm : Form
             Text = _locService.GetString("Settings_SaveApiKey", "Save key"),
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowOnly,
-            MinimumSize = new Size(95, 30),
-            Height = 30,
+            MinimumSize = new Size(104, 32),
             FlatStyle = FlatStyle.Flat,
             ForeColor = _textColor,
             BackColor = _sidebarColor,
+            Anchor = AnchorStyles.None,
+            Margin = new Padding(0, 4, 8, 4),
             AccessibleName = "Translation.ApiKeySave"
         };
-        MeasureNow(saveCredential);
-        saveCredential.Location = new Point(credentialInput.Right + 15, 4);
         var removeCredential = new Button
         {
             Text = _locService.GetString("Settings_RemoveApiKey", "Remove"),
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowOnly,
-            MinimumSize = new Size(95, 30),
-            Height = 30,
+            MinimumSize = new Size(104, 32),
             FlatStyle = FlatStyle.Flat,
             ForeColor = _textColor,
             BackColor = _sidebarColor,
-            Enabled = true,
+            Enabled = hasTranslationCredential,
             TabStop = hasTranslationCredential,
+            Anchor = AnchorStyles.None,
+            Margin = new Padding(0, 4, 0, 4),
             AccessibleName = "Translation.ApiKeyRemove"
         };
-        MeasureNow(removeCredential);
-        removeCredential.Location = new Point(saveCredential.Right + 10, 4);
-        var credentialPanel = new Panel
+        var credentialPanel = new TableLayoutPanel
         {
-            Width = Math.Max(700, removeCredential.Right + 10),
-            Height = 40,
-            Location = new Point(0, y),
+            Height = 44,
+            MinimumSize = new Size(0, 44),
+            ColumnCount = 4,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
             AccessibleName = "Translation.CredentialRow"
         };
+        credentialPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        credentialPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        credentialPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        credentialPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        credentialPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         saveCredential.Click += (_, _) =>
         {
             if (string.IsNullOrWhiteSpace(credentialInput.Text)) return;
@@ -1327,6 +1560,7 @@ public class SettingsForm : Form
                     "Settings_ApiKeyStored",
                     "Stored securely in Windows");
                 hasTranslationCredential = true;
+                removeCredential.Enabled = true;
                 removeCredential.TabStop = true;
             }
             catch (Exception exception)
@@ -1353,6 +1587,7 @@ public class SettingsForm : Form
                     "Settings_ApiKeyMissing",
                     "Required for online translation");
                 hasTranslationCredential = false;
+                removeCredential.Enabled = false;
                 removeCredential.TabStop = false;
                 _currentSettings.OnlineTranslationEnabled = false;
                 var onlineSwitch = onlineSetting?.Controls.OfType<ToggleSwitch>().FirstOrDefault();
@@ -1370,26 +1605,25 @@ public class SettingsForm : Form
                     MessageBoxIcon.Error);
             }
         };
-        credentialPanel.Controls.AddRange([
-            credentialLabel,
-            credentialInput,
-            saveCredential,
-            removeCredential
-        ]);
-        pnl.Controls.Add(credentialPanel);
-        y += 45;
+        credentialPanel.Controls.Add(credentialLabel, 0, 0);
+        credentialPanel.Controls.Add(credentialInput, 1, 0);
+        credentialPanel.Controls.Add(saveCredential, 2, 0);
+        credentialPanel.Controls.Add(removeCredential, 3, 0);
+        AddStackRow(stack, credentialPanel, 4);
 
         onlineSetting = CreateToggleSetting(
             _locService.GetString("Settings_EnableOnlineTranslation", "Allow online translation through Google Cloud"),
             _currentSettings.OnlineTranslationEnabled,
             v => { _currentSettings.OnlineTranslationEnabled = v; SaveSettings(); },
-            y);
-        pnl.Controls.Add(onlineSetting);
-        y += 50;
+            "Translation.Online");
+        AddStackRow(stack, onlineSetting);
 
-        var tsOffline = CreateToggleSetting(_locService.GetString("Settings_UseOfflineModel", "Use local offline model (No internet)"), _currentSettings.UseOfflineTranslation, v => { _currentSettings.UseOfflineTranslation = v; SaveSettings(); }, y);
-        pnl.Controls.Add(tsOffline);
-        y += 50;
+        var tsOffline = CreateToggleSetting(
+            _locService.GetString("Settings_UseOfflineModel", "Use local offline model (No internet)"),
+            _currentSettings.UseOfflineTranslation,
+            v => { _currentSettings.UseOfflineTranslation = v; SaveSettings(); },
+            "Translation.Offline");
+        AddStackRow(stack, tsOffline);
 
         var tsHistory = CreateToggleSetting(
             _locService.GetString(
@@ -1397,9 +1631,8 @@ public class SettingsForm : Form
                 "Save translation history locally (contains your text)"),
             _currentSettings.TranslationHistoryEnabled,
             v => { _currentSettings.TranslationHistoryEnabled = v; SaveSettings(); },
-            y);
-        pnl.Controls.Add(tsHistory);
-        y += 50;
+            "Translation.History");
+        AddStackRow(stack, tsHistory, 6);
 
         var clearHistory = new Button
         {
@@ -1407,11 +1640,11 @@ public class SettingsForm : Form
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowOnly,
             MinimumSize = new Size(280, 30),
-            Height = 30,
-            Location = new Point(0, y),
             FlatStyle = FlatStyle.Flat,
             ForeColor = _textColor,
-            BackColor = _sidebarColor
+            BackColor = _sidebarColor,
+            Dock = DockStyle.Left,
+            AccessibleName = "Translation.ClearHistory"
         };
         clearHistory.Click += async (_, _) =>
         {
@@ -1439,13 +1672,29 @@ public class SettingsForm : Form
                     MessageBoxIcon.Error);
             }
         };
-        pnl.Controls.Add(clearHistory);
-        y += 42;
+        var clearHistoryRow = new Panel { Height = 38, MinimumSize = new Size(0, 38) };
+        clearHistoryRow.Controls.Add(clearHistory);
+        AddStackRow(stack, clearHistoryRow, 6);
 
-        var lblModel = new Label { Text = _locService.GetString("Settings_ModelSelection", "Model selection:"), Font = new Font("Segoe UI", 10F), AutoSize = true, Location = new Point(0, y + 4), ForeColor = _textColor };
-        MeasureNow(lblModel);
-        int modelComboX = lblModel.Right + 15;
-        var cmbModel = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 350, Location = new Point(modelComboX, y), BackColor = _sidebarColor, ForeColor = _textColor };
+        var lblModel = new Label
+        {
+            Text = _locService.GetString("Settings_ModelSelection", "Model selection:"),
+            Font = new Font("Segoe UI", 10F),
+            AutoSize = true,
+            ForeColor = _textColor,
+            Anchor = AnchorStyles.Left,
+            Margin = Padding.Empty
+        };
+        var cmbModel = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Dock = DockStyle.Fill,
+            MinimumSize = new Size(300, 0),
+            BackColor = _sidebarColor,
+            ForeColor = _textColor,
+            Margin = new Padding(12, 7, 0, 7),
+            AccessibleName = "Translation.Model"
+        };
         cmbModel.Items.Add(new { Id = "light", Name = _locService.GetString("Settings_ModelLight", "Light Qwen 0.5B (398 MB, 4 languages)") });
         cmbModel.Items.Add(new { Id = "alma", Name = _locService.GetString("Settings_ModelAlma", "Specialized ALMA 7B (4.08 GB, 6 languages)") });
         cmbModel.Items.Add(new { Id = "pro", Name = _locService.GetString("Settings_ModelQwenPro", "Balanced Qwen2.5 1.5B (1.12 GB, 5 languages)") });
@@ -1453,42 +1702,64 @@ public class SettingsForm : Form
         cmbModel.DisplayMember = "Name";
 
         cmbModel.SelectedIndex = _currentSettings.OfflineModelType == "pro" ? 2 : (_currentSettings.OfflineModelType == "alma" ? 1 : 0);
-        pnl.Controls.Add(lblModel);
-        pnl.Controls.Add(cmbModel);
+        var modelRow = new TableLayoutPanel
+        {
+            Height = 44,
+            MinimumSize = new Size(0, 44),
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            AccessibleName = "Translation.ModelRow"
+        };
+        modelRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        modelRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        modelRow.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        modelRow.Controls.Add(lblModel, 0, 0);
+        modelRow.Controls.Add(cmbModel, 1, 0);
+        AddStackRow(stack, modelRow, 2);
+
         var lblModelCapabilities = new Label
         {
             AutoSize = true,
-            // Sits on the same row as btnDownload (below), not under cmbModel:
-            // it must clear btnDownload's fixed 200px width, not modelComboX.
-            Location = new Point(220, y + 44),
-            ForeColor = _textColor
+            ForeColor = Color.Gray,
+            AccessibleName = "Translation.ModelCapabilities"
         };
-        pnl.Controls.Add(lblModelCapabilities);
-        y += 40;
 
         var downloadService = _modelDownloadService;
         
         var btnDownload = new Button
         {
             Width = 200,
-            Height = 30,
-            Location = new Point(0, y),
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowOnly,
+            MinimumSize = new Size(200, 32),
             FlatStyle = FlatStyle.Flat,
             ForeColor = _textColor,
             BackColor = _sidebarColor,
+            Anchor = AnchorStyles.None,
+            Margin = new Padding(0, 4, 12, 4),
             AccessibleName = "Translation.ModelDownload"
         };
-        var progressDownload = new ProgressBar { Width = 280, Height = 10, Location = new Point(220, y + 10), Visible = false };
+        var progressDownload = new ProgressBar
+        {
+            Dock = DockStyle.Fill,
+            Height = 10,
+            Visible = false,
+            Margin = new Padding(0, 15, 12, 15)
+        };
         var btnCancelDownload = new Button
         {
             Text = _locService.GetString("Common_Cancel", "Cancel"),
-            Width = 110,
-            Height = 30,
-            Location = new Point(510, y),
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowOnly,
+            MinimumSize = new Size(110, 32),
             FlatStyle = FlatStyle.Flat,
             ForeColor = _textColor,
             BackColor = _sidebarColor,
-            Visible = false
+            Visible = false,
+            Anchor = AnchorStyles.None,
+            Margin = new Padding(0, 4, 0, 4)
         };
         CancellationTokenSource? activeDownloadCancellation = null;
         var selectedModelIsDownloaded = false;
@@ -1607,10 +1878,25 @@ public class SettingsForm : Form
             }
         };
 
-        pnl.Controls.Add(btnDownload);
-        pnl.Controls.Add(progressDownload);
-        pnl.Controls.Add(btnCancelDownload);
-        y += 50;
+        var downloadRow = new TableLayoutPanel
+        {
+            Height = 40,
+            MinimumSize = new Size(0, 40),
+            ColumnCount = 3,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            AccessibleName = "Translation.DownloadRow"
+        };
+        downloadRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        downloadRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        downloadRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        downloadRow.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        downloadRow.Controls.Add(btnDownload, 0, 0);
+        downloadRow.Controls.Add(progressDownload, 1, 0);
+        downloadRow.Controls.Add(btnCancelDownload, 2, 0);
+        AddStackRow(stack, downloadRow, 2);
+        AddStackRow(stack, lblModelCapabilities, 12);
 
         var locales = new LangItem[] {
             new LangItem{ Code="en", Name="English" }, new LangItem{ Code="ru", Name="Русский" }, new LangItem{ Code="uk", Name="Українська" },
@@ -1623,20 +1909,45 @@ public class SettingsForm : Form
             new LangItem{ Code="pt", Name="Português" }
         };
 
-        pnl.Controls.Add(CreateLanguageDropdown(_locService.GetString("Settings_TranslateLang1", "Translate to Language 1"), _currentSettings.TranslateLang1, locales.ToArray(), v => { _currentSettings.TranslateLang1 = v; SaveSettings(); }, ref y));
-        pnl.Controls.Add(CreateLanguageDropdown(_locService.GetString("Settings_TranslateLang2", "Translate to Language 2"), _currentSettings.TranslateLang2, locales.ToArray(), v => { _currentSettings.TranslateLang2 = v; SaveSettings(); }, ref y));
-        pnl.Controls.Add(CreateLanguageDropdown(_locService.GetString("Settings_TranslateLang3", "Translate to Language 3"), _currentSettings.TranslateLang3, locales.ToArray(), v => { _currentSettings.TranslateLang3 = v; SaveSettings(); }, ref y));
+        AddStackRow(stack, CreateLanguageDropdown(
+            _locService.GetString("Settings_TranslateLang1", "Translate to Language 1"),
+            _currentSettings.TranslateLang1,
+            locales,
+            v => { _currentSettings.TranslateLang1 = v; SaveSettings(); },
+            "Translation.Language1"));
+        AddStackRow(stack, CreateLanguageDropdown(
+            _locService.GetString("Settings_TranslateLang2", "Translate to Language 2"),
+            _currentSettings.TranslateLang2,
+            locales,
+            v => { _currentSettings.TranslateLang2 = v; SaveSettings(); },
+            "Translation.Language2"));
+        AddStackRow(stack, CreateLanguageDropdown(
+            _locService.GetString("Settings_TranslateLang3", "Translate to Language 3"),
+            _currentSettings.TranslateLang3,
+            locales,
+            v => { _currentSettings.TranslateLang3 = v; SaveSettings(); },
+            "Translation.Language3"));
 
-        _tabTranslate.Controls.Add(pnl);
+        _tabTranslate.Controls.Add(viewport);
     }
 
-    private Panel CreateLanguageDropdown(string label, string currentVal, LangItem[] locales, Action<string> onChange, ref int y)
+    private TableLayoutPanel CreateLanguageDropdown(
+        string label,
+        string currentVal,
+        LangItem[] locales,
+        Action<string> onChange,
+        string accessibleName)
     {
-        var lbl = new Label { Text = label, ForeColor = _textColor, Font = new Font("Segoe UI", 12), AutoSize = true, Location = new Point(0, 8) };
-        MeasureNow(lbl);
-        int comboX = Math.Max(lbl.Right + 15, 350);
-        var cmb = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Location = new Point(comboX, 8), BackColor = _sidebarColor, ForeColor = _textColor, DisplayMember = "Name", ValueMember = "Code" };
-        var pnl = new Panel { Width = Math.Max(500, comboX + cmb.Width), Height = 40, Location = new Point(0, y) };
+        var cmb = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Width = 170,
+            BackColor = _sidebarColor,
+            ForeColor = _textColor,
+            DisplayMember = "Name",
+            ValueMember = "Code",
+            AccessibleName = accessibleName + ".Combo"
+        };
 
         cmb.Items.AddRange(locales.Cast<object>().ToArray());
         var selectedIndex = Array.FindIndex(locales, locale =>
@@ -1648,10 +1959,7 @@ public class SettingsForm : Form
                 onChange(item.Code);
         };
         
-        pnl.Controls.Add(lbl);
-        pnl.Controls.Add(cmb);
-        y += 50;
-        return pnl;
+        return CreateControlSettingRow(label, cmb, accessibleName);
     }
 
     private void BuildAboutTab()

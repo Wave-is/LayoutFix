@@ -112,55 +112,14 @@ public class TrayManager : IDisposable
     {
         int size = SystemInformation.SmallIconSize.Width;
         if (size < 16) size = 16;
-
-        using var bitmap = new Bitmap(size, size);
-        using var graphics = Graphics.FromImage(bitmap);
-        
-        graphics.Clear(Color.Transparent);
-
-        var text = string.IsNullOrEmpty(_lastLayout) ? "EN" : _lastLayout;
-        if (text.Length > 2) text = text.Substring(0, 2);
-        text = text.ToUpperInvariant();
-        
         bool isEnabled = _settingsService.Current.AutoConversionEnabled;
-
-        if (_settingsService.Current.UseFlagIcons)
-        {
-            DrawFlag(graphics, text, size);
-        }
-        else
-        {
-            graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-            float fontSize = (size / 16f) * 7.5f; 
-            using var font = new Font("Segoe UI", fontSize, FontStyle.Regular);
-            
-            bool isLightTheme = false;
-            try
-            {
-                var value = Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "SystemUsesLightTheme", 0);
-                if (value != null && (int)value == 1) isLightTheme = true;
-            }
-            catch { }
-            
-            using var brush = new SolidBrush(isLightTheme ? Color.Black : Color.White);
-            
-            var textSize = graphics.MeasureString(text, font);
-            float x = (size - textSize.Width) / 2f;
-            float y = (size - textSize.Height) / 2f;
-            
-            graphics.DrawString(text, font, brush, x, y);
-        }
-
-        // Red means the input hooks are reconnecting. Otherwise orange means
-        // opt-in automatic correction is active and blue means manual mode.
         var hooksOperational = _hookRecoveryCoordinator.IsOperational;
-        var borderColor = hooksOperational
-            ? (isEnabled ? Color.Orange : Color.DodgerBlue)
-            : Color.Crimson;
-        using (var borderPen = new Pen(borderColor, 1))
-        {
-            graphics.DrawRectangle(borderPen, 0, 0, size - 1, size - 1);
-        }
+        using var bitmap = RenderTrayIconBitmap(
+            _lastLayout,
+            _settingsService.Current.UseFlagIcons,
+            isEnabled,
+            hooksOperational,
+            size);
 
         var iconHandle = bitmap.GetHicon();
         Icon newIcon;
@@ -186,6 +145,85 @@ public class TrayManager : IDisposable
         oldIcon?.Dispose();
     }
 
+    internal static Bitmap RenderTrayIconBitmap(
+        string? layout,
+        bool useFlagIcons,
+        bool automaticCorrectionEnabled,
+        bool hooksOperational,
+        int size)
+    {
+        size = Math.Clamp(size, 16, 64);
+        var bitmap = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.Clear(Color.Transparent);
+        graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+        graphics.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;
+
+        var text = string.IsNullOrWhiteSpace(layout) ? "EN" : layout.Trim();
+        if (text.Length > 2) text = text[..2];
+        text = text.ToUpperInvariant();
+
+        // The body itself carries the operating state, so the icon remains
+        // readable at 16-24 px without the old square outline around "RU".
+        var stateColor = hooksOperational
+            ? (automaticCorrectionEnabled ? Color.FromArgb(232, 138, 0) : Color.FromArgb(0, 120, 215))
+            : Color.FromArgb(205, 45, 58);
+        var inset = Math.Max(1F, size * 0.06F);
+        var body = new RectangleF(inset, inset, size - (2F * inset), size - (2F * inset));
+        using var bodyPath = CreateRoundedIconPath(body, Math.Max(3F, size * 0.24F));
+
+        if (useFlagIcons)
+        {
+            var savedState = graphics.Save();
+            graphics.SetClip(bodyPath);
+            DrawFlag(graphics, text, size);
+            graphics.Restore(savedState);
+
+            using var statePen = new Pen(stateColor, Math.Max(1.5F, size * 0.09F));
+            graphics.DrawPath(statePen, bodyPath);
+        }
+        else
+        {
+            using var bodyBrush = new SolidBrush(stateColor);
+            graphics.FillPath(bodyBrush, bodyPath);
+            graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+            using var font = new Font(
+                "Segoe UI",
+                Math.Max(7F, size * 0.43F),
+                FontStyle.Bold,
+                GraphicsUnit.Pixel);
+            using var textBrush = new SolidBrush(Color.White);
+            using var format = new StringFormat
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center,
+                FormatFlags = StringFormatFlags.NoWrap
+            };
+            graphics.DrawString(text, font, textBrush, body, format);
+        }
+
+        return bitmap;
+    }
+
+    private static System.Drawing.Drawing2D.GraphicsPath CreateRoundedIconPath(
+        RectangleF bounds,
+        float radius)
+    {
+        var diameter = Math.Min(Math.Min(bounds.Width, bounds.Height), radius * 2F);
+        var arc = new RectangleF(bounds.X, bounds.Y, diameter, diameter);
+        var path = new System.Drawing.Drawing2D.GraphicsPath();
+        path.AddArc(arc, 180, 90);
+        arc.X = bounds.Right - diameter;
+        path.AddArc(arc, 270, 90);
+        arc.Y = bounds.Bottom - diameter;
+        path.AddArc(arc, 0, 90);
+        arc.X = bounds.Left;
+        path.AddArc(arc, 90, 90);
+        path.CloseFigure();
+        return path;
+    }
+
     private void HookRecovery_OperationalStateChanged(object? sender, EventArgs eventArgs)
     {
         if (_disposed)
@@ -205,7 +243,7 @@ public class TrayManager : IDisposable
         }
     }
 
-    private void DrawFlag(Graphics g, string langCode, int size)
+    private static void DrawFlag(Graphics g, string langCode, int size)
     {
         // Simple and stylish flags
         if (langCode == "EN" || langCode == "US")
