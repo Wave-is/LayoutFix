@@ -1,6 +1,6 @@
 <div align="center">
   <img src="assets/logo.png" alt="LayoutFix Logo" width="128" />
-  <h1>LayoutFix v1.0.16</h1>
+  <h1>LayoutFix v1.0.17</h1>
   <p><b>A safety-first Windows keyboard-layout fixer and text translator.</b></p>
   <p>
     <a href="#english">English</a> •
@@ -47,7 +47,7 @@ A lightweight, powerful Windows background utility designed to solve common typi
 2. Download `LayoutFix_Setup.exe`.
 3. Verify the adjacent `LayoutFix_Setup.exe.sha256` checksum, then install the app. It will silently run in your system tray.
 
-> **Unsigned installer notice:** the v1.0.16 installer is intentionally distributed without an Authenticode signature, so Windows SmartScreen may show an unknown-publisher warning. Install it only after verifying the checksum. Automatic correction remains disabled by default.
+> **Unsigned installer notice:** the v1.0.17 installer is intentionally distributed without an Authenticode signature, so Windows SmartScreen may show an unknown-publisher warning. Install it only after verifying the checksum. Automatic correction remains disabled by default.
 
 ---
 
@@ -85,7 +85,7 @@ A lightweight, powerful Windows background utility designed to solve common typi
 2. Скачайте `LayoutFix_Setup.exe`.
 3. Сверьте контрольную сумму с файлом `LayoutFix_Setup.exe.sha256`, затем установите программу — она свернется в системный трей и будет работать в фоне.
 
-> **Неподписанный установщик:** v1.0.16 намеренно распространяется без подписи Authenticode, поэтому Windows SmartScreen может показать предупреждение о неизвестном издателе. Устанавливайте его только после проверки контрольной суммы. Автоисправление по умолчанию выключено.
+> **Неподписанный установщик:** v1.0.17 намеренно распространяется без подписи Authenticode, поэтому Windows SmartScreen может показать предупреждение о неизвестном издателе. Устанавливайте его только после проверки контрольной суммы. Автоисправление по умолчанию выключено.
 
 ---
 
@@ -121,7 +121,7 @@ A lightweight, powerful Windows background utility designed to solve common typi
 2. Завантажте `LayoutFix_Setup.exe`.
 3. Звірте контрольну суму з файлом `LayoutFix_Setup.exe.sha256`, потім установіть програму — вона згорнеться в системний трей.
 
-> **Непідписаний інсталятор:** v1.0.16 навмисно поширюється без підпису Authenticode, тому Windows SmartScreen може показати попередження про невідомого видавця. Встановлюйте його лише після перевірки контрольної суми. Автовиправлення типово вимкнене.
+> **Непідписаний інсталятор:** v1.0.17 навмисно поширюється без підпису Authenticode, тому Windows SmartScreen може показати попередження про невідомого видавця. Встановлюйте його лише після перевірки контрольної суми. Автовиправлення типово вимкнене.
 
 ---
 

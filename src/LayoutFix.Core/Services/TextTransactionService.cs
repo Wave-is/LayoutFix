@@ -9,7 +9,11 @@ public sealed class TextTransactionService : ITextTransactionService
 {
     private static readonly TimeSpan CopyTimeout = TimeSpan.FromMilliseconds(750);
     private const int CopyAttempts = 3;
-    private const int ClipboardPasteThreshold = 128;
+    // SendInput is materially more reliable than Ctrl+V for ordinary selections:
+    // several target UI threads acknowledge the injected paste chord before they
+    // consume the clipboard. Keep the clipboard path for genuinely large payloads
+    // where thousands of Unicode key events would be excessive.
+    private const int ClipboardPasteThreshold = 2_048;
     private const int RollbackModifierReleaseTimeoutMilliseconds = 250;
     private readonly IInputInjector _input;
     private readonly IClipboardService _clipboard;

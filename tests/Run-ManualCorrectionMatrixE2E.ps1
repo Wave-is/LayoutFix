@@ -51,10 +51,16 @@ for ($iteration = 1; $iteration -le $Runs; $iteration++) {
     $output = @(& $harness '--manual-correction-matrix' 2>&1)
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne 0 -or -not (Test-Path -LiteralPath $result)) {
+        $evidence = if (Test-Path -LiteralPath $result) {
+            Get-Content -LiteralPath $result -Raw
+        } else {
+            '<result file missing>'
+        }
         throw (
             "Manual correction matrix cold run $iteration/$Runs failed " +
             "with exit code $exitCode.`n" +
-            ($output -join [Environment]::NewLine))
+            ($output -join [Environment]::NewLine) + "`n" +
+            $evidence)
     }
 
     $resultFile = Get-Item -LiteralPath $result

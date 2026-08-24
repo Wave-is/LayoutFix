@@ -155,11 +155,36 @@ public class TextTransactionServiceTests
     }
 
     [Fact]
-    public async Task LongReplacement_UsesPasteAndRestoresOriginalClipboard()
+    public async Task ModerateReplacement_UsesUnicodeInputAndRestoresOriginalClipboard()
     {
         var originalClipboard = "user clipboard payload";
-        var source = new string('x', 160);
-        var replacement = new string('я', 160);
+        var source = new string('x', 447);
+        var replacement = new string('я', 447);
+        var clipboard = new FakeClipboardService(originalClipboard);
+        var input = new FakeInputInjector(clipboard, source, source);
+        var service = new TextTransactionService(
+            input,
+            clipboard,
+            new FakeActiveWindowProvider(),
+            new NullLogger());
+
+        var selection = await service.CaptureAsync(allowPreviousWordFallback: false);
+        var replaced = await service.ReplaceAsync(selection!, replacement);
+
+        Assert.True(replaced);
+        Assert.Equal(replacement, input.SentText);
+        Assert.Equal(0, input.PasteCount);
+        Assert.Null(input.PastedText);
+        Assert.Equal(originalClipboard, clipboard.Value);
+        Assert.Equal(2, clipboard.RestoreCount);
+    }
+
+    [Fact]
+    public async Task VeryLargeReplacement_UsesPasteAndRestoresOriginalClipboard()
+    {
+        var originalClipboard = "user clipboard payload";
+        var source = new string('x', 2_048);
+        var replacement = new string('я', 2_048);
         var clipboard = new FakeClipboardService(originalClipboard);
         var input = new FakeInputInjector(clipboard, source, source);
         var service = new TextTransactionService(
