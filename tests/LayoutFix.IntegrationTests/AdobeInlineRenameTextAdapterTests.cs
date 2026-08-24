@@ -10,6 +10,8 @@ public class AdobeInlineRenameTextAdapterTests
     [InlineData("afterfx", "AE_CApplication_25.3", "Edit", "after-effects-rename-v1")]
     [InlineData("Adobe Premiere Pro", "Premiere Pro", "Edit", "premiere-rename-v1")]
     [InlineData("Adobe Premiere Pro", "DroverLord - Window Class", "Edit", "premiere-rename-v1")]
+    [InlineData("Photoshop", "#32770", "Edit", "photoshop-save-dialog-v1")]
+    [InlineData("photoshop", "#32770", "Edit", "photoshop-save-dialog-v1")]
     public void ResolveAdapterId_AcceptsOnlyProvenAdobeApplicationProfiles(
         string processName,
         string mainClass,
@@ -33,6 +35,8 @@ public class AdobeInlineRenameTextAdapterTests
     [InlineData("Adobe Premiere Pro", "DroverLord", "Edit")]
     [InlineData("Premiere Pro", "Premiere Pro", "Edit")]
     [InlineData("Photoshop", "Premiere Pro", "Edit")]
+    [InlineData("Photoshop", "#32770", "RichEdit20W")]
+    [InlineData("Photoshop Helper", "#32770", "Edit")]
     public void ResolveAdapterId_RejectsLookalikeOrUnprovenProfiles(
         string processName,
         string mainClass,
@@ -111,6 +115,39 @@ public class AdobeInlineRenameTextAdapterTests
                 Assert.True(replaced);
                 Assert.Equal("before привет after", expectedValue);
                 Assert.Equal(expectedValue, editor.Text);
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(5)));
+        if (failure != null)
+            throw failure;
+    }
+
+    [Fact]
+    public void NativeEditCapture_ReadsOnlySelectedTextWithoutClipboard()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                using var editor = new TextBox { Text = "before ghbdtn after" };
+                _ = editor.Handle;
+                editor.Select(7, 6);
+
+                var captured = AdobeInlineRenameTextAdapter.TryReadNativeEditSelection(
+                    editor.Handle,
+                    out var currentValue,
+                    out var selectedText);
+
+                Assert.True(captured);
+                Assert.Equal(editor.Text, currentValue);
+                Assert.Equal("ghbdtn", selectedText);
             }
             catch (Exception exception)
             {

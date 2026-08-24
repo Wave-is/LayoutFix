@@ -11,6 +11,8 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
 {
     internal const string AfterEffectsAdapterId = "after-effects-rename-v1";
     internal const string PremiereAdapterId = "premiere-rename-v1";
+    internal const string PhotoshopSaveDialogAdapterId = "photoshop-save-dialog-v1";
+    private const int MaximumNativeEditLength = 32_767;
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromMilliseconds(300);
     private readonly IActiveWindowProvider _activeWindow;
     private readonly ILoggerService _logger;
@@ -55,6 +57,20 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
             return false;
         }
 
+        if (string.Equals(
+                adapterId,
+                PhotoshopSaveDialogAdapterId,
+                StringComparison.Ordinal))
+        {
+            return await RunBoundedAsync(
+                () => ReplacePhotoshopSaveDialogSelection(
+                    context,
+                    expectedText,
+                    replacement),
+                timeoutResult: false,
+                cancellationToken);
+        }
+
         if (!await RunBoundedAsync(
             () => ValidateReplacementCore(context, expectedText),
             timeoutResult: false,
@@ -76,6 +92,20 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
         ActiveWindowContext context,
         string adapterId)
     {
+        if (string.Equals(
+                adapterId,
+                PhotoshopSaveDialogAdapterId,
+                StringComparison.Ordinal))
+        {
+            return TryGetPhotoshopSaveDialogSelection(
+                    context,
+                    out _,
+                    out var nativeSelectedText) &&
+                nativeSelectedText.Length > 0
+                ? DirectTextCaptureResult.Captured(adapterId, nativeSelectedText)
+                : DirectTextCaptureResult.Rejected(adapterId);
+        }
+
         var element = AutomationElement.FocusedElement;
         if (!TryGetRenamePatterns(context, element, out var value, out var text))
             return DirectTextCaptureResult.Rejected(adapterId);
@@ -117,6 +147,36 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
         }
 
         return true;
+    }
+
+    private bool ReplacePhotoshopSaveDialogSelection(
+        ActiveWindowContext context,
+        string expectedText,
+        string replacement)
+    {
+        if (!TryGetPhotoshopSaveDialogSelection(
+                context,
+                out var currentValue,
+                out var selectedText) ||
+            !string.Equals(selectedText, expectedText, StringComparison.Ordinal) ||
+            !_activeWindow.IsSameActiveWindow(context) ||
+            !TryReplaceNativeSelection(
+                context.FocusedWindow,
+                currentValue,
+                expectedText,
+                replacement,
+                out var expectedValue) ||
+            !_activeWindow.IsSameActiveWindow(context))
+        {
+            return false;
+        }
+
+        return TryReadNativeEditSelection(
+                context.FocusedWindow,
+                out var verifiedValue,
+                out _) &&
+            string.Equals(verifiedValue, expectedValue, StringComparison.Ordinal) &&
+            _activeWindow.IsSameActiveWindow(context);
     }
 
     private bool ReplaceSelectionCore(
@@ -223,6 +283,104 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
             end > start &&
             end <= currentValue.Length &&
             string.Equals(currentValue[start..end], expectedText, StringComparison.Ordinal);
+    }
+
+    internal static bool TryReadNativeEditSelection(
+        IntPtr editWindow,
+        out string currentValue,
+        out string selectedText)
+    {
+        currentValue = string.Empty;
+        selectedText = string.Empty;
+        if (editWindow == IntPtr.Zero ||
+            Win32.SendMessageTimeout(
+                editWindow,
+                Win32.WM_GETTEXTLENGTH,
+                IntPtr.Zero,
+                IntPtr.Zero,
+                Win32.SMTO_BLOCK | Win32.SMTO_ABORTIFHUNG,
+                100,
+                out var lengthResult) == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var length = checked((int)lengthResult.ToInt64());
+        if (length < 0 || length > MaximumNativeEditLength)
+            return false;
+
+        var buffer = new StringBuilder(length + 1);
+        if (Win32.SendMessageTimeout(
+                editWindow,
+                Win32.WM_GETTEXT,
+                new IntPtr(buffer.Capacity),
+                buffer,
+                Win32.SMTO_BLOCK | Win32.SMTO_ABORTIFHUNG,
+                100,
+                out _) == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        currentValue = buffer.ToString();
+        if (Win32.SendMessageTimeout(
+                editWindow,
+                Win32.EM_GETSEL,
+                IntPtr.Zero,
+                IntPtr.Zero,
+                Win32.SMTO_BLOCK | Win32.SMTO_ABORTIFHUNG,
+                100,
+                out var selectionResult) == IntPtr.Zero)
+        {
+            currentValue = string.Empty;
+            return false;
+        }
+
+        var packedRange = unchecked((uint)selectionResult.ToInt64());
+        var start = (int)(packedRange & 0xFFFF);
+        var end = (int)(packedRange >> 16);
+        if (start < 0 || end < start || end > currentValue.Length)
+        {
+            currentValue = string.Empty;
+            return false;
+        }
+
+        selectedText = currentValue[start..end];
+        return true;
+    }
+
+    private bool TryGetPhotoshopSaveDialogSelection(
+        ActiveWindowContext context,
+        out string currentValue,
+        out string selectedText)
+    {
+        currentValue = string.Empty;
+        selectedText = string.Empty;
+        if (!_activeWindow.IsSameActiveWindow(context) ||
+            Win32.GetWindowThreadProcessId(context.FocusedWindow, out var processId) == 0 ||
+            processId != context.ProcessId)
+        {
+            return false;
+        }
+
+        var focusedClass = new StringBuilder(32);
+        if (Win32.GetClassName(
+                context.FocusedWindow,
+                focusedClass,
+                focusedClass.Capacity) <= 0 ||
+            !string.Equals(focusedClass.ToString(), "Edit", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var style = Win32.GetWindowLongPtr(context.FocusedWindow, Win32.GWL_STYLE).ToInt64();
+        if ((style & (Win32.ES_PASSWORD | Win32.ES_READONLY)) != 0)
+            return false;
+
+        return TryReadNativeEditSelection(
+            context.FocusedWindow,
+            out currentValue,
+            out selectedText);
     }
 
     private static bool TryGetRenamePatterns(
@@ -354,6 +512,15 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
              string.Equals(mainClass, "DroverLord - Window Class", StringComparison.Ordinal)))
         {
             return PremiereAdapterId;
+        }
+
+        if (string.Equals(
+                processName,
+                "Photoshop",
+                StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(mainClass, "#32770", StringComparison.Ordinal))
+        {
+            return PhotoshopSaveDialogAdapterId;
         }
 
         return null;

@@ -52,6 +52,8 @@ public static class Win32
     public const uint EM_GETSEL = 0x00B0;
     public const uint EM_REPLACESEL = 0x00C2;
     public const uint EM_GETPASSWORDCHAR = 0x00D2;
+    public const uint WM_GETTEXT = 0x000D;
+    public const uint WM_GETTEXTLENGTH = 0x000E;
     public const uint SMTO_BLOCK = 0x0001;
     public const uint SMTO_ABORTIFHUNG = 0x0002;
 
@@ -161,6 +163,16 @@ public static class Win32
         uint message,
         IntPtr wParam,
         string lParam,
+        uint flags,
+        uint timeout,
+        out IntPtr result);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr SendMessageTimeout(
+        IntPtr hWnd,
+        uint message,
+        IntPtr wParam,
+        StringBuilder lParam,
         uint flags,
         uint timeout,
         out IntPtr result);

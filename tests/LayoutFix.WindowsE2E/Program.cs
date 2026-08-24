@@ -1382,13 +1382,13 @@ internal static class Program
         {
             try
             {
-                if (!NativeFocus.IsChild(window, preferredControl))
-                    return false;
-
                 var className = new System.Text.StringBuilder(256);
                 if (Win32.GetClassName(preferredControl, className, className.Capacity) <= 0 ||
                     !className.ToString().Contains("Edit", StringComparison.OrdinalIgnoreCase))
                 {
+                    AppendResult(
+                        $"focus-probe:path=exact-control;rejected=class;" +
+                        $"value={className}");
                     return false;
                 }
 
@@ -1399,6 +1399,10 @@ internal static class Program
                 if (mainThread == 0 || controlThread == 0 ||
                     mainProcessId == 0 || mainProcessId != controlProcessId)
                 {
+                    AppendResult(
+                        $"focus-probe:path=exact-control;rejected=identity;" +
+                        $"mainThread={mainThread};controlThread={controlThread};" +
+                        $"mainPid={mainProcessId};controlPid={controlProcessId}");
                     return false;
                 }
 
@@ -1409,7 +1413,18 @@ internal static class Program
                     current.ControlType != ControlType.Edit ||
                     !current.IsEnabled || current.IsOffscreen || current.IsPassword)
                 {
+                    AppendResult(
+                        $"focus-probe:path=exact-control;rejected=metadata;" +
+                        $"pid={current.ProcessId};handle=0x{current.NativeWindowHandle:X};" +
+                        $"type={current.ControlType.ProgrammaticName};enabled={current.IsEnabled};" +
+                        $"offscreen={current.IsOffscreen};password={current.IsPassword}");
                     return false;
+                }
+
+                if (HasNativeFocus(preferredControl))
+                {
+                    AppendResult("focus-probe:path=exact-control-native;focused=True");
+                    return true;
                 }
 
                 var nativeFocused = TrySetNativeChildFocus(window, preferredControl);
@@ -1433,6 +1448,23 @@ internal static class Program
                     await Task.Delay(50);
                 }
 
+                if (nativeFocused || HasNativeFocus(preferredControl))
+                {
+                    AppendResult("focus-probe:path=exact-control-native;focused=True");
+                    return true;
+                }
+
+                var targetThreadAfter = Win32.GetWindowThreadProcessId(preferredControl, out _);
+                var guiInfoAfter = new Win32.GUITHREADINFO
+                {
+                    cbSize = Marshal.SizeOf<Win32.GUITHREADINFO>()
+                };
+                var hasGuiInfo = targetThreadAfter != 0 &&
+                    Win32.GetGUIThreadInfo(targetThreadAfter, ref guiInfoAfter);
+                AppendResult(
+                    $"focus-probe:path=exact-control;focused=False;" +
+                    $"nativeFocused={nativeFocused};guiInfo={hasGuiInfo};" +
+                    $"nativeHandle=0x{guiInfoAfter.hwndFocus.ToInt64():X}");
                 return false;
             }
             catch (Exception exception)
@@ -1975,6 +2007,20 @@ internal static class Program
 
         throw new ExternalException(
             "The clipboard sentinel did not become stable before the E2E transaction.");
+    }
+
+    private static bool HasNativeFocus(IntPtr childWindow)
+    {
+        var targetThread = Win32.GetWindowThreadProcessId(childWindow, out _);
+        if (targetThread == 0)
+            return false;
+
+        var guiInfo = new Win32.GUITHREADINFO
+        {
+            cbSize = Marshal.SizeOf<Win32.GUITHREADINFO>()
+        };
+        return Win32.GetGUIThreadInfo(targetThread, ref guiInfo) &&
+            guiInfo.hwndFocus == childWindow;
     }
 
     private static string DescribeClipboard()
