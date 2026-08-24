@@ -583,8 +583,15 @@ public class UIAutomationTests
             CancellationToken cancellationToken = default)
         {
             // Simulate a provider that cannot observe cancellation while it is
-            // inside a native call and only returns after the action deadline.
-            await Task.Delay(TimeSpan.FromMilliseconds(250));
+            // inside a native call and returns success only after the action
+            // deadline. Waiting for the actual cancellation signal avoids a
+            // wall-clock race when a shared runner delays the CancelAfter timer.
+            var deadlineReached = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            using var registration = cancellationToken.Register(
+                static state => ((TaskCompletionSource)state!).TrySetResult(),
+                deadlineReached);
+            await deadlineReached.Task.WaitAsync(TimeSpan.FromSeconds(5));
             return true;
         }
 
