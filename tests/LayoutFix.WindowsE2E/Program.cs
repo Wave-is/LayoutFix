@@ -72,6 +72,8 @@ internal static class Program
                 args[1],
                 args.Length >= 3 ? args[2] : "Dictionary",
                 args.Length >= 4 ? args[3] : null);
+        if (args.Length >= 1 && args[0] == "--hotkey-repeat-test")
+            return RunSuppressedHotkeyRepeatTest();
         if (args.Length >= 1 && args[0] == "--autostart-registry-test")
             return RunAutoStartRegistryTest();
         if (args.Length >= 1 && args[0] == "--settings-clean-close-test")
@@ -334,8 +336,6 @@ internal static class Program
         using var targetGuard = new WindowsTextTargetGuard(activeWindow, logger, settings);
         using var directTextAdapter = new AdobeInlineRenameTextAdapter(
             activeWindow,
-            nativeInput,
-            clipboard,
             logger);
         var textTransaction = new TextTransactionService(
             input,
@@ -1819,23 +1819,30 @@ internal static class Program
                 autoConvert: false,
                 new MemoryStream([9, 8, 7, 6]));
             Clipboard.SetDataObject(complex, copy: true, retryTimes: 5, retryDelay: 50);
-            var rejected = false;
-            try
+            using (var complexSnapshot = clipboard.CaptureAsync().GetAwaiter().GetResult())
             {
-                using var unexpected = clipboard.CaptureAsync().GetAwaiter().GetResult();
-            }
-            catch (NotSupportedException)
-            {
-                rejected = true;
+                Clipboard.SetText("temporary complex overwrite", TextDataFormat.UnicodeText);
+                clipboard.RestoreAsync(complexSnapshot).GetAwaiter().GetResult();
             }
 
-            var complexUntouched = Clipboard.ContainsText(TextDataFormat.UnicodeText) &&
-                Clipboard.GetText(TextDataFormat.UnicodeText) == "COMPLEX_SENTINEL" &&
-                Clipboard.ContainsImage();
+            var restoredComplex = Clipboard.GetDataObject()
+                ?? throw new InvalidOperationException("Restored complex clipboard has no data object.");
+            var restoredPrivateBytes = ReadStreamBytes(
+                restoredComplex.GetData(privateFormatName, autoConvert: false));
+            var complexTextPreserved = Clipboard.ContainsText(TextDataFormat.UnicodeText) &&
+                Clipboard.GetText(TextDataFormat.UnicodeText) == "COMPLEX_SENTINEL";
+            var complexImagePreserved = Clipboard.ContainsImage();
+            var complexPrivatePreserved = restoredPrivateBytes.SequenceEqual(
+                new byte[] { 9, 8, 7, 6 });
+            var complexPreserved = complexTextPreserved &&
+                complexImagePreserved &&
+                complexPrivatePreserved;
             var privateFormatNameRedacted = File.Exists(logPath) &&
                 !File.ReadAllText(logPath).Contains(privateFormatName, StringComparison.Ordinal);
             AppendResult(
-                $"clipboard-formats:complexRejected={rejected};untouched={complexUntouched};" +
+                $"clipboard-formats:complexPreserved={complexPreserved};" +
+                $"text={complexTextPreserved};image={complexImagePreserved};" +
+                $"private={complexPrivatePreserved};" +
                 $"privateFormatNameRedacted={privateFormatNameRedacted}");
 
             var hostStart = new ProcessStartInfo(
@@ -1874,7 +1881,7 @@ internal static class Program
                 $"advertisedFormatCount={advertisedFormatCount};" +
                 $"restoredAdvertisedFormatCount={restoredAdvertisedFormatCount}");
 
-            result = formatsPassed && rejected && complexUntouched &&
+            result = formatsPassed && complexPreserved &&
                 privateFormatNameRedacted && emptyOleFallbackObserved && emptyRestored
                     ? 0
                     : 2;
@@ -1944,18 +1951,30 @@ internal static class Program
 
     private static async Task SetClipboardSentinelAsync()
     {
-        for (var attempt = 1; ; attempt++)
+        for (var attempt = 1; attempt <= 10; attempt++)
         {
             try
             {
                 Clipboard.SetText(ClipboardSentinel, TextDataFormat.UnicodeText);
-                return;
+                // Clipboard history/sync tools can publish a delayed ownership
+                // update immediately after SetText returns. Start the production
+                // transaction only after the exact sentinel survives a short
+                // stability window; otherwise the test would blame LayoutFix for
+                // preserving data that an external monitor legitimately replaced.
+                await Task.Delay(100);
+                if (IsClipboardSentinelRestored())
+                    return;
             }
             catch (ExternalException) when (attempt < 10)
             {
-                await Task.Delay(attempt * 20);
             }
+
+            if (attempt < 10)
+                await Task.Delay(attempt * 20);
         }
+
+        throw new ExternalException(
+            "The clipboard sentinel did not become stable before the E2E transaction.");
     }
 
     private static string DescribeClipboard()
@@ -3302,7 +3321,7 @@ internal static class Program
                     .OfType<Button>()
                     .Where(button => button.Visible && button.Parent != null &&
                         form.PointToClient(button.Parent.PointToScreen(Point.Empty)).X == 0 &&
-                        button.Width == 220)
+                        button.Width >= 220)
                     .OrderBy(button => button.PointToScreen(Point.Empty).Y)
                     .ToArray();
                 if (sidebarButtons.Length != 7)
@@ -3319,7 +3338,7 @@ internal static class Program
                 var expectedTitle = tabName.ToUpperInvariant() switch
                 {
                     "GENERAL" => localization.GetString("Settings_General", "App Settings"),
-                    "HOTKEYS" => "Global Shortcuts",
+                    "HOTKEYS" => localization.GetString("Settings_Hotkeys", "Global Shortcuts"),
                     "EXCEPTIONS" => localization.GetString("Settings_Exceptions", "App Exceptions"),
                     "TRANSLATE" => localization.GetString("Settings_Translate", "Auto-Translate"),
                     "DICTIONARY" => localization.GetString("Settings_Dict", "Dictionary"),
@@ -3335,7 +3354,7 @@ internal static class Program
                         .OfType<Label>()
                         .First(label => label.Text.Equals(expectedTitle, StringComparison.Ordinal));
                     var titlePosition = form.PointToClient(title.PointToScreen(Point.Empty));
-                    if (titlePosition.X < 220 || titlePosition.Y < 50)
+                    if (titlePosition.X < 290 || titlePosition.Y < 60)
                     {
                         throw new InvalidOperationException(
                             $"{tabName} title overlaps the settings chrome at {titlePosition}.");
@@ -3585,6 +3604,19 @@ internal static class Program
 
                 if (tabName.Equals("Translate", StringComparison.OrdinalIgnoreCase))
                 {
+                    var controlsByAccessibleName = Descendants(form)
+                        .Where(control => !string.IsNullOrWhiteSpace(control.AccessibleName))
+                        .ToDictionary(control => control.AccessibleName!, StringComparer.Ordinal);
+                    var privacyNote = controlsByAccessibleName["Translation.OnlinePrivacyNote"];
+                    var credentialRow = controlsByAccessibleName["Translation.CredentialRow"];
+                    var privacyBounds = privacyNote.RectangleToScreen(privacyNote.ClientRectangle);
+                    var credentialBounds = credentialRow.RectangleToScreen(credentialRow.ClientRectangle);
+                    if (privacyBounds.Bottom + 8 > credentialBounds.Top)
+                    {
+                        throw new InvalidOperationException(
+                            "The online-translation privacy note overlaps the API credential row.");
+                    }
+
                     var visibleCombos = Descendants(form)
                         .OfType<ComboBox>()
                         .Where(combo => combo.Visible)
@@ -3602,21 +3634,27 @@ internal static class Program
 
                     var capabilityLabel = Descendants(form)
                         .OfType<Label>()
-                        .SingleOrDefault(label => label.Visible && label.Text.StartsWith(
-                            "Validated offline targets:",
+                        .SingleOrDefault(label => label.Visible && label.Text.Equals(
+                            localization.GetString(
+                                "Settings_ModelLightCapabilities",
+                                "Validated offline targets: EN, RU, FR, ES."),
                             StringComparison.Ordinal));
-                    if (capabilityLabel?.Text != "Validated offline targets: EN, RU, FR, ES.")
+                    if (capabilityLabel == null)
                         throw new InvalidOperationException("Light model capability summary is missing.");
 
                     var modelCombo = visibleCombos[0];
                     modelCombo.SelectedIndex = 2;
                     Application.DoEvents();
-                    if (capabilityLabel.Text != "Validated offline targets: EN, RU, UK, FR, ES.")
+                    if (capabilityLabel.Text != localization.GetString(
+                            "Settings_ModelQwenProCapabilities",
+                            "Validated offline targets: EN, RU, UK, FR, ES."))
                         throw new InvalidOperationException("Balanced model capability summary did not update.");
 
                     modelCombo.SelectedIndex = 1;
                     Application.DoEvents();
-                    if (capabilityLabel.Text != "Validated offline targets: EN, RU, UK, DE, FR, ES.")
+                    if (capabilityLabel.Text != localization.GetString(
+                            "Settings_ModelAlmaCapabilities",
+                            "Validated offline targets: EN, RU, UK, DE, FR, ES."))
                         throw new InvalidOperationException("ALMA model capability summary did not update.");
 
                     modelCombo.SelectedIndex = 0;
@@ -3643,7 +3681,7 @@ internal static class Program
                 var unexpectedTopBarPixels = 0;
                 for (var y = 2; y < Math.Min(38, bitmap.Height); y++)
                 {
-                    for (var x = 220; x < bitmap.Width - 60; x++)
+                    for (var x = 290; x < bitmap.Width - 60; x++)
                     {
                         var pixel = bitmap.GetPixel(x, y);
                         if (pixel.A > 0 && pixel.R + pixel.G + pixel.B > 480)
@@ -6033,6 +6071,98 @@ internal static class Program
         }
     }
 
+    private static int RunSuppressedHotkeyRepeatTest()
+    {
+        var testDirectory = Path.Combine(
+            Path.GetTempPath(),
+            $"LayoutFix.HotkeyRepeat.{Guid.NewGuid():N}");
+        Directory.CreateDirectory(testDirectory);
+        try
+        {
+            var settings = new SettingsService(Path.Combine(testDirectory, "settings.json"));
+            settings.Current.LoggingEnabled = true;
+            settings.Save(settings.Current);
+            var logger = new FileLoggerService(
+                settings,
+                Path.Combine(testDirectory, "hotkey-repeat.log"));
+            using var keyboardHook = new KeyboardHook(logger);
+            using var form = new Form
+            {
+                Text = "LayoutFix suppressed-repeat E2E",
+                Width = 480,
+                Height = 160,
+                StartPosition = FormStartPosition.CenterScreen,
+                TopMost = true
+            };
+            form.Controls.Add(new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Text = "repeat probe",
+                Font = new Font("Segoe UI", 16)
+            });
+
+            var result = 3;
+            var hotkeyEvents = 0;
+            long generationAtInitialHotkey = -1;
+            keyboardHook.HotkeyPressed += (_, observation) =>
+            {
+                if (!observation.Combo.Matches(HotkeyCombo.Parse("Ctrl+F12")))
+                    return;
+
+                hotkeyEvents++;
+                if (hotkeyEvents == 1)
+                    generationAtInitialHotkey = keyboardHook.InputGeneration;
+                observation.Handled = true;
+            };
+
+            form.Shown += async (_, _) =>
+            {
+                try
+                {
+                    keyboardHook.Start();
+                    form.Activate();
+                    form.Controls[0].Focus();
+                    await Task.Delay(150);
+                    SendExternalHotkeyWithSuppressedRepeats("Ctrl+F12", 0x7B);
+                    await Task.Delay(200);
+
+                    var finalGeneration = keyboardHook.InputGeneration;
+                    if (hotkeyEvents == 1 &&
+                        generationAtInitialHotkey >= 0 &&
+                        finalGeneration == generationAtInitialHotkey)
+                    {
+                        Console.WriteLine(
+                            "hotkey_repeat=pass repeats=4 dispatched_actions=1 generation_stable=true");
+                        result = 0;
+                    }
+                    else
+                    {
+                        Console.Error.WriteLine(
+                            $"Suppressed repeat advanced input ownership: actions={hotkeyEvents} " +
+                            $"initial={generationAtInitialHotkey} final={finalGeneration}.");
+                    }
+                }
+                finally
+                {
+                    form.Close();
+                }
+            };
+
+            Application.Run(form);
+            return result;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine(
+                $"Suppressed hotkey repeat E2E failed: {exception.GetType().Name}.");
+            return 4;
+        }
+        finally
+        {
+            try { Directory.Delete(testDirectory, recursive: true); } catch { }
+        }
+    }
+
     private static IEnumerable<Control> Descendants(Control parent)
     {
         foreach (Control child in parent.Controls)
@@ -6074,6 +6204,33 @@ internal static class Program
                 Marshal.GetLastWin32Error(),
                 $"Physical hotkey E2E SendInput accepted {sent} of {batch.Length} events.");
         }
+    }
+
+    private static void SendExternalHotkeyWithSuppressedRepeats(
+        string configuredHotkey,
+        ushort virtualKey)
+    {
+        var combo = HotkeyCombo.Parse(configuredHotkey);
+        if (combo.Win)
+            throw new InvalidOperationException("Windows-key E2E hotkeys are not supported.");
+
+        var pressedModifiers = new List<ushort>();
+        if (combo.Ctrl) pressedModifiers.Add(0x11);
+        if (combo.Alt) pressedModifiers.Add(0x12);
+        if (combo.Shift) pressedModifiers.Add(0x10);
+
+        foreach (var modifier in pressedModifiers)
+            SendExternalKeyDown(modifier);
+        SendExternalKeyDown(virtualKey);
+        Thread.Sleep(50);
+        for (var repeat = 0; repeat < 4; repeat++)
+        {
+            SendExternalKeyDown(virtualKey);
+            Thread.Sleep(20);
+        }
+        SendExternalKeyUp(virtualKey);
+        foreach (var modifier in pressedModifiers.AsEnumerable().Reverse())
+            SendExternalKeyUp(modifier);
     }
 
     private static void SendExternalSelectAll() => SendExternalChord(0x11, (ushort)'A');

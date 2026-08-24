@@ -1,6 +1,6 @@
 <div align="center">
   <img src="assets/logo.png" alt="LayoutFix Logo" width="128" />
-  <h1>LayoutFix v1.0.15</h1>
+  <h1>LayoutFix v1.0.16</h1>
   <p><b>A safety-first Windows keyboard-layout fixer and text translator.</b></p>
   <p>
     <a href="#english">English</a> •
@@ -39,7 +39,7 @@ A lightweight, powerful Windows background utility designed to solve common typi
 - Online translation is disabled by default and uses the official, billable [Google Cloud Translation Basic v2 API](https://cloud.google.com/translate/docs/reference/rest/v2/translate). It requires the user's own API key, which is kept in Windows Credential Manager rather than `settings.json`; history and diagnostic logging are also disabled by default. Opt-in support logs record timestamps, operation IDs, failure stages/reasons, and limited target metadata (application name/version, window/control class, and supported UI Automation patterns). They never record typed/selected text, window titles, clipboard contents, API keys, custom replacements, or absolute Windows paths.
 - During testing, enable **Diagnostic logs for testing** and, if useful, **Show diagnostic popup messages** on the General settings page. Reproduce the failure, then send `%LOCALAPPDATA%\LayoutFix\Logs\layoutfix.log` (and `layoutfix.log.bak` if present) together with the safe report from About.
 - The About page can generate a readable compatibility report for support. It contains runtime metadata and configuration counts, never typed text, clipboard data, paths, API keys, process names, custom replacements, or log contents.
-- Ordinary Chromium text provenance metadata is restored byte-for-byte. If the clipboard contains a complex bitmap/OLE/application-specific payload that cannot be preserved safely, LayoutFix cancels the text operation without changing it.
+- Chromium provenance metadata and supported complex clipboard values (including bitmap and application streams) are cloned by value and restored byte-for-byte. If any advertised value type cannot be cloned safely, LayoutFix cancels before changing either the text or clipboard.
 - Windows blocks input injection into elevated applications from a normal process; run both applications at the same integrity level.
 
 ### Installation
@@ -47,7 +47,7 @@ A lightweight, powerful Windows background utility designed to solve common typi
 2. Download `LayoutFix_Setup.exe`.
 3. Verify the adjacent `LayoutFix_Setup.exe.sha256` checksum, then install the app. It will silently run in your system tray.
 
-> **Unsigned installer notice:** the v1.0.15 installer is intentionally distributed without an Authenticode signature, so Windows SmartScreen may show an unknown-publisher warning. Install it only after verifying the checksum. Automatic correction remains disabled by default.
+> **Unsigned installer notice:** the v1.0.16 installer is intentionally distributed without an Authenticode signature, so Windows SmartScreen may show an unknown-publisher warning. Install it only after verifying the checksum. Automatic correction remains disabled by default.
 
 ---
 
@@ -77,7 +77,7 @@ A lightweight, powerful Windows background utility designed to solve common typi
 - Онлайн-перевод по умолчанию выключен и использует официальный платный [Google Cloud Translation Basic v2 API](https://cloud.google.com/translate/docs/reference/rest/v2/translate). Нужен собственный API-ключ пользователя; он хранится в Диспетчере учётных данных Windows, а не в `settings.json`. История и диагностические логи также выключены. Включённый support-лог записывает время, идентификаторы операций, этапы и причины ошибок и ограниченные сведения о цели (имя/версия приложения, классы окна/контрола и доступные UI Automation patterns), но никогда не записывает введённый/выделенный текст, заголовки окон, содержимое буфера, API-ключи, свои автозамены или абсолютные Windows-пути.
 - Для тестирования включите на вкладке «Основные» параметры «Диагностические логи для тестирования» и при необходимости «Показывать диагностические сообщения». Воспроизведите ошибку и передайте `%LOCALAPPDATA%\LayoutFix\Logs\layoutfix.log` (а также `layoutfix.log.bak`, если он есть) вместе с безопасным отчётом со вкладки «О программе».
 - На вкладке «О программе» формируется читаемый отчёт для диагностики совместимости. В нём есть только сведения о среде и счётчики настроек — без введённого текста, буфера обмена, путей, API-ключей, имён процессов, своих автозамен и содержимого логов.
-- Служебные метаданные обычного текста Chromium восстанавливаются побайтно. Если в clipboard находится сложное изображение/OLE/application-specific содержимое, которое нельзя гарантированно сохранить, операция безопасно отменяется без изменения текста.
+- Метаданные Chromium и поддерживаемые сложные значения буфера (включая bitmap и потоки приложений) клонируются по значению и восстанавливаются побайтно. Если тип хотя бы одного объявленного значения нельзя безопасно клонировать, LayoutFix отменяет операцию до изменения текста или буфера.
 - Windows запрещает обычному процессу ввод в приложение, запущенное от администратора; уровни прав должны совпадать.
 
 ### Установка
@@ -85,7 +85,7 @@ A lightweight, powerful Windows background utility designed to solve common typi
 2. Скачайте `LayoutFix_Setup.exe`.
 3. Сверьте контрольную сумму с файлом `LayoutFix_Setup.exe.sha256`, затем установите программу — она свернется в системный трей и будет работать в фоне.
 
-> **Неподписанный установщик:** v1.0.15 намеренно распространяется без подписи Authenticode, поэтому Windows SmartScreen может показать предупреждение о неизвестном издателе. Устанавливайте его только после проверки контрольной суммы. Автоисправление по умолчанию выключено.
+> **Неподписанный установщик:** v1.0.16 намеренно распространяется без подписи Authenticode, поэтому Windows SmartScreen может показать предупреждение о неизвестном издателе. Устанавливайте его только после проверки контрольной суммы. Автоисправление по умолчанию выключено.
 
 ---
 
@@ -114,14 +114,14 @@ A lightweight, powerful Windows background utility designed to solve common typi
 - Онлайн-переклад за замовчуванням вимкнений і використовує офіційний платний [Google Cloud Translation Basic v2 API](https://cloud.google.com/translate/docs/reference/rest/v2/translate). Потрібен власний API-ключ користувача; він зберігається у Диспетчері облікових даних Windows, а не в `settings.json`. Історія та діагностичні журнали також вимкнені. Увімкнений support-журнал записує час, ідентифікатори операцій, етапи й причини помилок та обмежені відомості про ціль (назву/версію застосунку, класи вікна/контрола й доступні UI Automation patterns), але ніколи не записує введений/виділений текст, заголовки вікон, вміст буфера, API-ключі, власні автозаміни або абсолютні Windows-шляхи.
 - Для тестування ввімкніть на вкладці «Загальні» параметри «Діагностичні журнали для тестування» і за потреби «Показувати діагностичні повідомлення». Відтворіть помилку та передайте `%LOCALAPPDATA%\LayoutFix\Logs\layoutfix.log` (а також `layoutfix.log.bak`, якщо він є) разом із безпечним звітом із вкладки «Про програму».
 - На вкладці «Про програму» формується читабельний звіт для діагностики сумісності. Він містить лише відомості про середовище та лічильники налаштувань — без введеного тексту, буфера обміну, шляхів, API-ключів, назв процесів, власних автозамін і вмісту журналів.
-- Службові метадані звичайного тексту Chromium відновлюються побайтно. Якщо clipboard містить складне зображення/OLE/application-specific наповнення, яке неможливо гарантовано зберегти, операція скасовується без зміни тексту.
+- Метадані Chromium і підтримувані складні значення буфера (зокрема bitmap та потоки застосунків) клонуються за значенням і відновлюються побайтно. Якщо тип хоча б одного оголошеного значення не можна безпечно клонувати, LayoutFix скасовує операцію до зміни тексту або буфера.
 
 ### Встановлення
 1. Перейдіть на вкладку [Releases](../../releases).
 2. Завантажте `LayoutFix_Setup.exe`.
 3. Звірте контрольну суму з файлом `LayoutFix_Setup.exe.sha256`, потім установіть програму — вона згорнеться в системний трей.
 
-> **Непідписаний інсталятор:** v1.0.15 навмисно поширюється без підпису Authenticode, тому Windows SmartScreen може показати попередження про невідомого видавця. Встановлюйте його лише після перевірки контрольної суми. Автовиправлення типово вимкнене.
+> **Непідписаний інсталятор:** v1.0.16 навмисно поширюється без підпису Authenticode, тому Windows SmartScreen може показати попередження про невідомого видавця. Встановлюйте його лише після перевірки контрольної суми. Автовиправлення типово вимкнене.
 
 ---
 

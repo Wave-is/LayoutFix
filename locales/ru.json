@@ -82,6 +82,7 @@
   "Settings_SaveErrorMessage": "Не удалось сохранить настройки. Проверьте права на файл и автозапуск Windows.",
   "Settings_KeyboardPrefix": "Клавиатура:",
   "Settings_Active": "Активна",
+  "Settings_UseWindowsLayouts": "Использовать установленные раскладки Windows",
   "Settings_BuiltWith": "Создано на .NET 8.",
   "Settings_AboutTagline": "Автоматическое исправление раскладки и перевод текста.",
   "Settings_ClearTranslationHistory": "Очистить сохранённую историю переводов",

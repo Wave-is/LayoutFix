@@ -128,8 +128,6 @@ public sealed class ClipboardService : IClipboardService
         if (unsupportedFormats.Length > 0)
         {
             _logger.LogWarning(DescribeUnsupportedFormatsForDiagnostics(unsupportedFormats));
-            throw new NotSupportedException(
-                "The clipboard contains complex data that cannot be preserved safely.");
         }
 
         var copy = new DataObject();
@@ -220,8 +218,8 @@ public sealed class ClipboardService : IClipboardService
         IReadOnlyCollection<string> unsupportedFormats)
     {
         ArgumentNullException.ThrowIfNull(unsupportedFormats);
-        return "Text transaction was cancelled because the clipboard contains " +
-            $"complex formats. Count: {unsupportedFormats.Count}.";
+        return "Clipboard complex formats will be cloned by supported value type. " +
+            $"Count: {unsupportedFormats.Count}.";
     }
 
     internal static bool IsIgnorableFormat(string format) =>

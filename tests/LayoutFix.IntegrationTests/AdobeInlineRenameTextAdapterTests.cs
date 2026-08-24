@@ -1,4 +1,5 @@
 using LayoutFix.Infrastructure.Services;
+using System.Windows.Forms;
 
 namespace LayoutFix.IntegrationTests;
 
@@ -8,6 +9,7 @@ public class AdobeInlineRenameTextAdapterTests
     [InlineData("AfterFX", "AE_CApplication_25.0", "Edit", "after-effects-rename-v1")]
     [InlineData("afterfx", "AE_CApplication_25.3", "Edit", "after-effects-rename-v1")]
     [InlineData("Adobe Premiere Pro", "Premiere Pro", "Edit", "premiere-rename-v1")]
+    [InlineData("Adobe Premiere Pro", "DroverLord - Window Class", "Edit", "premiere-rename-v1")]
     public void ResolveAdapterId_AcceptsOnlyProvenAdobeApplicationProfiles(
         string processName,
         string mainClass,
@@ -28,6 +30,7 @@ public class AdobeInlineRenameTextAdapterTests
     [InlineData("AfterFX-helper", "AE_CApplication_25.0", "Edit")]
     [InlineData("Adobe Premiere Pro", "Premiere Pro", "RichEdit20W")]
     [InlineData("Adobe Premiere Pro", "Premiere Pro 2025", "Edit")]
+    [InlineData("Adobe Premiere Pro", "DroverLord", "Edit")]
     [InlineData("Premiere Pro", "Premiere Pro", "Edit")]
     [InlineData("Photoshop", "Premiere Pro", "Edit")]
     public void ResolveAdapterId_RejectsLookalikeOrUnprovenProfiles(
@@ -84,5 +87,40 @@ public class AdobeInlineRenameTextAdapterTests
             "Other",
             "привет",
             expectedAccessibleName: "ghbdtn"));
+    }
+
+    [Fact]
+    public void NativeEditReplacement_ChangesOnlySelectedTextWithoutClipboard()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                using var editor = new TextBox { Text = "before ghbdtn after" };
+                _ = editor.Handle;
+                editor.Select(7, 6);
+
+                var replaced = AdobeInlineRenameTextAdapter.TryReplaceNativeSelection(
+                    editor.Handle,
+                    editor.Text,
+                    "ghbdtn",
+                    "привет",
+                    out var expectedValue);
+
+                Assert.True(replaced);
+                Assert.Equal("before привет after", expectedValue);
+                Assert.Equal(expectedValue, editor.Text);
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(5)));
+        if (failure != null)
+            throw failure;
     }
 }

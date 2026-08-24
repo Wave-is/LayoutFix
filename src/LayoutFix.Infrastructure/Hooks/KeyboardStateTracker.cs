@@ -47,7 +47,10 @@ internal sealed class KeyboardStateTracker
     /// GetAsyncKeyState still represents the state before the current event, so
     /// it can distinguish a real held-key repeat from a fresh physical press.
     /// </summary>
-    public void ReconcilePriorStateBeforeKeyDown(Func<int, bool> isPressed)
+    public void ReconcilePriorStateBeforeKeyDown(
+        Func<int, bool> isPressed,
+        int currentKey = 0,
+        uint eventTime = 0)
     {
         ArgumentNullException.ThrowIfNull(isPressed);
         var changed = false;
@@ -55,6 +58,20 @@ internal sealed class KeyboardStateTracker
         {
             if (isPressed(pressedKey))
                 continue;
+
+            // Some keyboard drivers (and SendInput) briefly report the trigger
+            // as up while delivering its held-key repeats. Keep an already
+            // suppressed trigger across that bounded gap. A genuinely missing
+            // key-up is still repaired when the next press arrives after the
+            // one-second grace period.
+            if (pressedKey == currentKey &&
+                _suppressedKeys.Contains(pressedKey) &&
+                eventTime != 0 &&
+                _lastKeyDownTimes.TryGetValue(pressedKey, out var previousTime) &&
+                unchecked(eventTime - previousTime) <= 1_000)
+            {
+                continue;
+            }
 
             _pressedKeys.Remove(pressedKey);
             _suppressedKeys.Remove(pressedKey);

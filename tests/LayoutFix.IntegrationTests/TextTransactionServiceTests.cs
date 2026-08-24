@@ -88,10 +88,11 @@ public class TextTransactionServiceTests
     public async Task ApplicableDirectAdapterWithoutExactSelection_FailsClosed()
     {
         var clipboard = new FakeClipboardService("user clipboard payload");
+        var input = new FakeInputInjector(clipboard);
         var adapter = new FakeDirectTextAdapter(
             DirectTextCaptureResult.Rejected("test-direct"));
         var service = new TextTransactionService(
-            new FakeInputInjector(clipboard),
+            input,
             clipboard,
             new FakeActiveWindowProvider(),
             new NullLogger(),
@@ -100,10 +101,38 @@ public class TextTransactionServiceTests
         var selection = await service.CaptureAsync(allowPreviousWordFallback: true);
 
         Assert.Null(selection);
-        Assert.Equal(1, adapter.CaptureCount);
+        Assert.Equal(2, adapter.CaptureCount);
         Assert.Equal(0, adapter.ReplaceCount);
         Assert.Equal(0, clipboard.CaptureCount);
+        Assert.Equal(1, input.SelectWordCount);
+        Assert.Equal(1, input.CollapseSelectionCount);
         Assert.Equal("user clipboard payload", clipboard.Value);
+    }
+
+    [Fact]
+    public async Task ApplicableDirectAdapter_UsesPreviousWordFallbackWithoutClipboard()
+    {
+        var clipboard = new FakeClipboardService("complex user clipboard payload");
+        var input = new FakeInputInjector(clipboard);
+        var adapter = new FakeDirectTextAdapter(
+            DirectTextCaptureResult.Rejected("test-direct"),
+            DirectTextCaptureResult.Captured("test-direct", "ghbdtn"));
+        var service = new TextTransactionService(
+            input,
+            clipboard,
+            new FakeActiveWindowProvider(),
+            new NullLogger(),
+            directTextAdapter: adapter);
+
+        var selection = await service.CaptureAsync(allowPreviousWordFallback: true);
+
+        Assert.NotNull(selection);
+        Assert.Equal("ghbdtn", selection!.Text);
+        Assert.True(selection.WasSelectedByFallback);
+        Assert.Equal(2, adapter.CaptureCount);
+        Assert.Equal(1, input.SelectWordCount);
+        Assert.Equal(0, clipboard.CaptureCount);
+        Assert.Equal("complex user clipboard payload", clipboard.Value);
     }
 
     [Fact]
@@ -563,8 +592,9 @@ public class TextTransactionServiceTests
     }
 
     private sealed class FakeDirectTextAdapter(
-        DirectTextCaptureResult captureResult) : IDirectTextAdapter
+        params DirectTextCaptureResult[] captureResults) : IDirectTextAdapter
     {
+        private readonly Queue<DirectTextCaptureResult> _captureResults = new(captureResults);
         public int CaptureCount { get; private set; }
         public int ReplaceCount { get; private set; }
         public string? ExpectedText { get; private set; }
@@ -576,7 +606,10 @@ public class TextTransactionServiceTests
             CancellationToken cancellationToken = default)
         {
             CaptureCount++;
-            return Task.FromResult(captureResult);
+            var result = _captureResults.Count > 1
+                ? _captureResults.Dequeue()
+                : _captureResults.Peek();
+            return Task.FromResult(result);
         }
 
         public Task<bool> TryReplaceAsync(

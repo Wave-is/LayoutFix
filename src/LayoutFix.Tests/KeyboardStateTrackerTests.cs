@@ -88,6 +88,28 @@ public class KeyboardStateTrackerTests
     }
 
     [Fact]
+    public void SuppressedHotkeyRepeat_IsNotCountedAsNewUserInput()
+    {
+        var tracker = new KeyboardStateTracker();
+
+        tracker.ProcessKeyDown(Win32.VK_SCROLL, 0);
+        tracker.SuppressUntilKeyUp(Win32.VK_SCROLL);
+        var suppressedRepeat = tracker.ProcessKeyDown(Win32.VK_SCROLL, 0);
+        var ordinaryRepeat = tracker.ProcessKeyDown('A', 0);
+        ordinaryRepeat = tracker.ProcessKeyDown('A', 0);
+
+        Assert.True(suppressedRepeat.IsRepeat);
+        Assert.True(tracker.IsSuppressed(Win32.VK_SCROLL));
+        Assert.True(ordinaryRepeat.IsRepeat);
+        Assert.False(KeyboardHook.ShouldAdvanceInputGeneration(
+            suppressedRepeat,
+            suppressedRepeat: true));
+        Assert.True(KeyboardHook.ShouldAdvanceInputGeneration(
+            ordinaryRepeat,
+            suppressedRepeat: false));
+    }
+
+    [Fact]
     public void HookNamesExtendedFunctionKeys()
     {
         Assert.Equal("f24", KeyboardHook.MapVirtualKeyToString(0x87));
@@ -122,6 +144,31 @@ public class KeyboardStateTrackerTests
 
         Assert.False(first.IsRepeat);
         Assert.False(nextPhysicalPress.IsRepeat);
+        Assert.False(tracker.IsSuppressed(f12));
+    }
+
+    [Fact]
+    public void SuppressedRepeat_SurvivesTransientAsyncStateGapButStalePressRecovers()
+    {
+        const int f12 = 0x7B;
+        var tracker = new KeyboardStateTracker();
+
+        tracker.ProcessKeyDown(f12, 0, 1_000);
+        tracker.SuppressUntilKeyUp(f12);
+        tracker.ReconcilePriorStateBeforeKeyDown(
+            _ => false,
+            currentKey: f12,
+            eventTime: 1_500);
+        var heldRepeat = tracker.ProcessKeyDown(f12, 0, 1_500);
+
+        tracker.ReconcilePriorStateBeforeKeyDown(
+            _ => false,
+            currentKey: f12,
+            eventTime: 3_000);
+        var freshPress = tracker.ProcessKeyDown(f12, 0, 3_000);
+
+        Assert.True(heldRepeat.IsRepeat);
+        Assert.False(freshPress.IsRepeat);
         Assert.False(tracker.IsSuppressed(f12));
     }
 

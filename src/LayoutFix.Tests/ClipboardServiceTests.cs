@@ -43,7 +43,7 @@ public class ClipboardServiceTests
     }
 
     [Fact]
-    public void ComplexFormats_AreRejectedBeforeTheirDataIsRequested()
+    public void ComplexFormats_AreClassifiedForGuardedValueCloning()
     {
         foreach (var format in new[]
                  {

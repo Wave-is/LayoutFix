@@ -87,9 +87,29 @@ public sealed class TextTransactionService : ITextTransactionService
                     cancellationToken);
                 if (directCapture.IsApplicable)
                 {
+                    if ((string.IsNullOrEmpty(directCapture.Text) ||
+                         string.IsNullOrEmpty(directCapture.AdapterId)) &&
+                        allowPreviousWordFallback &&
+                        !InputChanged(captureInputGeneration) &&
+                        _activeWindow.IsSameActiveWindow(window))
+                    {
+                        await _input.SelectWordLeftAsync();
+                        fallbackSelectionMade = true;
+                        directCapture = await _directTextAdapter.TryCaptureAsync(
+                            window,
+                            cancellationToken);
+                    }
+
                     if (string.IsNullOrEmpty(directCapture.Text) ||
                         string.IsNullOrEmpty(directCapture.AdapterId))
                     {
+                        if (fallbackSelectionMade)
+                        {
+                            await CollapseFallbackSelectionAsync(
+                                window,
+                                captureInputGeneration,
+                                cancellationToken);
+                        }
                         LogSupportDiagnostic(captureId, "capture", "rejected", "direct-adapter-selection-unverified");
                         return null;
                     }
@@ -113,7 +133,7 @@ public sealed class TextTransactionService : ITextTransactionService
                     return new TextSelection(
                         directCapture.Text,
                         window,
-                        WasSelectedByFallback: false,
+                        WasSelectedByFallback: fallbackSelectionMade,
                         captureInputGeneration.Keyboard,
                         captureInputGeneration.Mouse,
                         directCapture.AdapterId,

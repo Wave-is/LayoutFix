@@ -13,21 +13,15 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
     internal const string PremiereAdapterId = "premiere-rename-v1";
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromMilliseconds(300);
     private readonly IActiveWindowProvider _activeWindow;
-    private readonly IInputInjector _input;
-    private readonly IClipboardService _clipboard;
     private readonly ILoggerService _logger;
     private readonly SemaphoreSlim _probeGate = new(1, 1);
     private volatile bool _disposed;
 
     public AdobeInlineRenameTextAdapter(
         IActiveWindowProvider activeWindow,
-        IInputInjector input,
-        IClipboardService clipboard,
         ILoggerService logger)
     {
         _activeWindow = activeWindow;
-        _input = input;
-        _clipboard = clipboard;
         _logger = logger;
     }
 
@@ -69,38 +63,13 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
             return false;
         }
 
-        // Adobe commits these transient fields when UIA SetValue or Unicode packet
-        // input is used. A normal paste preserves the edit transaction, so
-        // use the clipboard only after the exact full-field selection was proven
-        // and restore every user format unconditionally. ClipboardService provides
-        // its own bounded worker; do not return on an outer timeout while restoration
-        // is still in flight.
-        using var snapshot = await _clipboard.CaptureAsync(cancellationToken);
-        try
-        {
-            await _clipboard.SetTextAsync(replacement, cancellationToken);
-            if (!await RunBoundedAsync(
-                () => ValidateReplacementCore(context, expectedText),
-                timeoutResult: false,
-                cancellationToken))
-            {
-                return false;
-            }
-
-            await _input.SendKeyCombinationAsync(true, false, false, "v");
-            await Task.Delay(75, cancellationToken);
-            if (!_activeWindow.IsSameActiveWindow(context))
-                return false;
-
-            return await RunBoundedAsync(
-                () => VerifyReplacementCore(context, expectedText, replacement),
-                timeoutResult: false,
-                cancellationToken);
-        }
-        finally
-        {
-            await _clipboard.RestoreAsync(snapshot, CancellationToken.None);
-        }
+        // Adobe's rename field is a real Win32 Edit control. EM_REPLACESEL changes
+        // only its proven selection, keeps the rename transaction open, and does not
+        // touch the user's clipboard (which may contain delayed Adobe/OLE formats).
+        return await RunBoundedAsync(
+            () => ReplaceSelectionCore(context, expectedText, replacement),
+            timeoutResult: false,
+            cancellationToken);
     }
 
     private DirectTextCaptureResult CaptureCore(
@@ -111,19 +80,16 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
         if (!TryGetRenamePatterns(context, element, out var value, out var text))
             return DirectTextCaptureResult.Rejected(adapterId);
 
-        var currentValue = value.Current.Value;
         var selections = text.GetSelection();
-        if (string.IsNullOrEmpty(currentValue) ||
-            selections.Length != 1 ||
-            !string.Equals(
-                selections[0].GetText(-1),
-                currentValue,
-                StringComparison.Ordinal))
+        if (selections.Length != 1)
         {
             return DirectTextCaptureResult.Rejected(adapterId);
         }
 
-        return DirectTextCaptureResult.Captured(adapterId, currentValue);
+        var selectedText = selections[0].GetText(-1);
+        return string.IsNullOrEmpty(selectedText)
+            ? DirectTextCaptureResult.Rejected(adapterId)
+            : DirectTextCaptureResult.Captured(adapterId, selectedText);
     }
 
     private bool ValidateReplacementCore(
@@ -140,8 +106,7 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
             return false;
 
         var selections = text.GetSelection();
-        if (!string.Equals(value.Current.Value, expectedText, StringComparison.Ordinal) ||
-            selections.Length != 1 ||
+        if (selections.Length != 1 ||
             !string.Equals(
                 selections[0].GetText(-1),
                 expectedText,
@@ -154,23 +119,110 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
         return true;
     }
 
-    private bool VerifyReplacementCore(
+    private bool ReplaceSelectionCore(
         ActiveWindowContext context,
         string expectedText,
         string replacement)
     {
+        var element = AutomationElement.FocusedElement;
+        if (!TryGetRenamePatterns(
+                context,
+                element,
+                out var value,
+                out var text,
+                expectedAccessibleName: expectedText) ||
+            !_activeWindow.IsSameActiveWindow(context))
+        {
+            return false;
+        }
+
+        var selections = text.GetSelection();
+        var currentValue = value.Current.Value;
+        if (selections.Length != 1 ||
+            !string.Equals(selections[0].GetText(-1), expectedText, StringComparison.Ordinal) ||
+            !TryGetSelectionRange(context.FocusedWindow, currentValue, expectedText, out var start, out var end))
+        {
+            return false;
+        }
+
+        if (!TryReplaceNativeSelection(
+                context.FocusedWindow,
+                currentValue,
+                expectedText,
+                replacement,
+                out var expectedValue) ||
+            !_activeWindow.IsSameActiveWindow(context))
+            return false;
+
         var currentElement = AutomationElement.FocusedElement;
         return TryGetRenamePatterns(
                 context,
                 currentElement,
-                out var currentValue,
+                out var currentValuePattern,
                 out _,
                 expectedAccessibleName: expectedText) &&
-            string.Equals(
-                currentValue.Current.Value,
-                replacement,
-                StringComparison.Ordinal) &&
+            string.Equals(currentValuePattern.Current.Value, expectedValue, StringComparison.Ordinal) &&
             _activeWindow.IsSameActiveWindow(context);
+    }
+
+    internal static bool TryReplaceNativeSelection(
+        IntPtr editWindow,
+        string currentValue,
+        string expectedText,
+        string replacement,
+        out string expectedValue)
+    {
+        expectedValue = currentValue;
+        if (!TryGetSelectionRange(
+                editWindow,
+                currentValue,
+                expectedText,
+                out var start,
+                out var end))
+        {
+            return false;
+        }
+
+        expectedValue = string.Concat(
+            currentValue.AsSpan(0, start),
+            replacement.AsSpan(),
+            currentValue.AsSpan(end));
+        return Win32.SendMessageTimeout(
+            editWindow,
+            Win32.EM_REPLACESEL,
+            new IntPtr(1),
+            replacement,
+            Win32.SMTO_BLOCK | Win32.SMTO_ABORTIFHUNG,
+            150,
+            out _) != IntPtr.Zero;
+    }
+
+    internal static bool TryGetSelectionRange(
+        IntPtr editWindow,
+        string currentValue,
+        string expectedText,
+        out int start,
+        out int end)
+    {
+        start = end = 0;
+        var sent = Win32.SendMessageTimeout(
+            editWindow,
+            Win32.EM_GETSEL,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            Win32.SMTO_BLOCK | Win32.SMTO_ABORTIFHUNG,
+            100,
+            out var result);
+        if (sent == IntPtr.Zero)
+            return false;
+
+        var packedRange = unchecked((uint)result.ToInt64());
+        start = (int)(packedRange & 0xFFFF);
+        end = (int)(packedRange >> 16);
+        return start >= 0 &&
+            end > start &&
+            end <= currentValue.Length &&
+            string.Equals(currentValue[start..end], expectedText, StringComparison.Ordinal);
     }
 
     private static bool TryGetRenamePatterns(
@@ -298,7 +350,8 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
                 processName,
                 "Adobe Premiere Pro",
                 StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(mainClass, "Premiere Pro", StringComparison.Ordinal))
+            (string.Equals(mainClass, "Premiere Pro", StringComparison.Ordinal) ||
+             string.Equals(mainClass, "DroverLord - Window Class", StringComparison.Ordinal)))
         {
             return PremiereAdapterId;
         }

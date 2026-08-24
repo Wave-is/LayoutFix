@@ -88,14 +88,19 @@ public class KeyboardHook : IKeyboardHook
                     return Win32.CallNextHookEx(_hookId, nCode, wParam, lParam);
                 }
 
-                Interlocked.Increment(ref _inputGeneration);
-
-                _state.ReconcilePriorStateBeforeKeyDown(IsKeyPressed);
+                _state.ReconcilePriorStateBeforeKeyDown(
+                    IsKeyPressed,
+                    vkCode,
+                    hookStruct.time);
                 var transition = _state.ProcessKeyDown(vkCode, hookStruct.flags, hookStruct.time);
+                var suppressedRepeat = transition.IsRepeat && _state.IsSuppressed(vkCode);
+                if (ShouldAdvanceInputGeneration(transition, suppressedRepeat))
+                    Interlocked.Increment(ref _inputGeneration);
+
                 if (transition.Combo == null)
                     return Win32.CallNextHookEx(_hookId, nCode, wParam, lParam);
 
-                if (transition.IsRepeat && _state.IsSuppressed(vkCode))
+                if (suppressedRepeat)
                     return new IntPtr(1);
 
                 var text = GetTypedText(hookStruct);
@@ -153,6 +158,11 @@ public class KeyboardHook : IKeyboardHook
         var canonical = HotkeyCombo.GetCanonicalKeyName(vkCode);
         return canonical.Length == 0 ? "unknown" : canonical;
     }
+
+    internal static bool ShouldAdvanceInputGeneration(
+        KeyboardTransition transition,
+        bool suppressedRepeat) =>
+        !transition.IsRepeat || !suppressedRepeat;
 
     public void Dispose()
     {

@@ -98,7 +98,8 @@ public class SettingsForm : Form
         this.AutoScaleMode = AutoScaleMode.Dpi;
         this.AutoScaleDimensions = new SizeF(96F, 96F);
         this.Text = _locService.GetString("Settings_Title", "LayoutFix");
-        this.Size = new Size(1150, 700);
+        this.Size = new Size(1320, 760);
+        this.MinimumSize = new Size(1000, 650);
         this.StartPosition = FormStartPosition.CenterScreen;
         this.Font = new Font("Segoe UI", 10F);
         this.FormBorderStyle = FormBorderStyle.None;
@@ -120,7 +121,7 @@ public class SettingsForm : Form
         _pnlSidebar = new Panel
         {
             Dock = DockStyle.Left,
-            Width = 220,
+            Width = 290,
             BackColor = _sidebarColor,
             Padding = new Padding(0, 20, 0, 0)
         };
@@ -612,14 +613,15 @@ public class SettingsForm : Form
         // The table fits in the fixed settings window. AutoScroll caused WinForms
         // to shift the entire tab when a child received focus, placing the title
         // and table underneath the custom top bar.
-        var pnl = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 50, 0, 0) };
+        var pnl = new Panel { Dock = DockStyle.Fill };
         var lblTitle = new Label
         {
             Text = _locService.GetString("Settings_Hotkeys", "Global Shortcuts"),
             ForeColor = _textColor,
             Font = new Font("Segoe UI", 18, FontStyle.Bold),
-            AutoSize = true,
-            Location = Point.Empty
+            Dock = DockStyle.Top,
+            Height = 58,
+            TextAlign = ContentAlignment.MiddleLeft
         };
         
         var tlp = new TableLayoutPanel
@@ -641,6 +643,8 @@ public class SettingsForm : Form
         tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 35F));
         tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 24.667F));
         tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 35F));
+        for (var row = 0; row < tlp.RowCount; row++)
+            tlp.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 24.667F));
         tlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 35F));
 
@@ -677,7 +681,14 @@ public class SettingsForm : Form
         tlp.ResumeLayout(false);
         tlp.PerformLayout();
 
-        pnl.Controls.Add(tlp);
+        var tableHost = new Panel
+        {
+            Dock = DockStyle.Fill,
+            AutoScroll = true,
+            AccessibleName = "Hotkeys.TableHost"
+        };
+        tableHost.Controls.Add(tlp);
+        pnl.Controls.Add(tableHost);
         pnl.Controls.Add(lblTitle);
         _tabHotkeys.Controls.Add(pnl);
     }
@@ -716,6 +727,8 @@ public class SettingsForm : Form
         {
             Text = config.Hotkey,
             Dock = DockStyle.Fill,
+            Font = new Font("Segoe UI", 9F),
+            MinimumSize = new Size(0, 34),
             FlatStyle = FlatStyle.Flat,
             BackColor = _sidebarColor,
             ForeColor = _textColor,
@@ -800,7 +813,7 @@ public class SettingsForm : Form
             ForeColor = _textColor,
             Font = new Font("Segoe UI", 18, FontStyle.Bold),
             AutoSize = true,
-            Location = new Point(0, 0)
+            Location = new Point(0, 6)
         };
 
         var layout = new TableLayoutPanel
@@ -812,7 +825,7 @@ public class SettingsForm : Form
             Padding = Padding.Empty
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 58));
 
@@ -1217,8 +1230,9 @@ public class SettingsForm : Form
 
         int y = 0;
         var lblTitle = new Label { Text = _locService.GetString("Settings_Translate", "Auto-Translate"), ForeColor = _textColor, Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Location = new Point(0, y) };
+        MeasureNow(lblTitle);
         pnl.Controls.Add(lblTitle);
-        y += 40;
+        y = lblTitle.Bottom + 10;
 
         var lblNote = new Label
         {
@@ -1226,11 +1240,13 @@ public class SettingsForm : Form
             ForeColor = Color.Orange,
             Font = new Font("Segoe UI", 10, FontStyle.Italic),
             AutoSize = true,
-            MaximumSize = new Size(540, 0),
-            Location = new Point(0, y)
+            MaximumSize = new Size(800, 0),
+            Location = new Point(0, y),
+            AccessibleName = "Translation.OnlinePrivacyNote"
         };
+        MeasureNow(lblNote);
         pnl.Controls.Add(lblNote);
-        y += 40;
+        y = lblNote.Bottom + 12;
 
         var hasTranslationCredential = false;
         try
@@ -1260,7 +1276,8 @@ public class SettingsForm : Form
             MaxLength = 256,
             PlaceholderText = hasTranslationCredential
                 ? _locService.GetString("Settings_ApiKeyStored", "Stored securely in Windows")
-                : _locService.GetString("Settings_ApiKeyMissing", "Required for online translation")
+                : _locService.GetString("Settings_ApiKeyMissing", "Required for online translation"),
+            AccessibleName = "Translation.ApiKey"
         };
         var saveCredential = new Button
         {
@@ -1271,7 +1288,8 @@ public class SettingsForm : Form
             Height = 30,
             FlatStyle = FlatStyle.Flat,
             ForeColor = _textColor,
-            BackColor = _sidebarColor
+            BackColor = _sidebarColor,
+            AccessibleName = "Translation.ApiKeySave"
         };
         MeasureNow(saveCredential);
         saveCredential.Location = new Point(credentialInput.Right + 15, 4);
@@ -1285,11 +1303,19 @@ public class SettingsForm : Form
             FlatStyle = FlatStyle.Flat,
             ForeColor = _textColor,
             BackColor = _sidebarColor,
-            Enabled = hasTranslationCredential
+            Enabled = true,
+            TabStop = hasTranslationCredential,
+            AccessibleName = "Translation.ApiKeyRemove"
         };
         MeasureNow(removeCredential);
         removeCredential.Location = new Point(saveCredential.Right + 10, 4);
-        var credentialPanel = new Panel { Width = Math.Max(700, removeCredential.Right + 10), Height = 40, Location = new Point(0, y) };
+        var credentialPanel = new Panel
+        {
+            Width = Math.Max(700, removeCredential.Right + 10),
+            Height = 40,
+            Location = new Point(0, y),
+            AccessibleName = "Translation.CredentialRow"
+        };
         saveCredential.Click += (_, _) =>
         {
             if (string.IsNullOrWhiteSpace(credentialInput.Text)) return;
@@ -1300,7 +1326,8 @@ public class SettingsForm : Form
                 credentialInput.PlaceholderText = _locService.GetString(
                     "Settings_ApiKeyStored",
                     "Stored securely in Windows");
-                removeCredential.Enabled = true;
+                hasTranslationCredential = true;
+                removeCredential.TabStop = true;
             }
             catch (Exception exception)
             {
@@ -1315,6 +1342,9 @@ public class SettingsForm : Form
         };
         removeCredential.Click += (_, _) =>
         {
+            if (!hasTranslationCredential)
+                return;
+
             try
             {
                 _translationCredentials.SaveApiKey(null);
@@ -1322,7 +1352,8 @@ public class SettingsForm : Form
                 credentialInput.PlaceholderText = _locService.GetString(
                     "Settings_ApiKeyMissing",
                     "Required for online translation");
-                removeCredential.Enabled = false;
+                hasTranslationCredential = false;
+                removeCredential.TabStop = false;
                 _currentSettings.OnlineTranslationEnabled = false;
                 var onlineSwitch = onlineSetting?.Controls.OfType<ToggleSwitch>().FirstOrDefault();
                 if (onlineSwitch != null) onlineSwitch.Checked = false;
@@ -1437,7 +1468,16 @@ public class SettingsForm : Form
 
         var downloadService = _modelDownloadService;
         
-        var btnDownload = new Button { Width = 200, Height = 30, Location = new Point(0, y), FlatStyle = FlatStyle.Flat, ForeColor = _textColor, BackColor = _sidebarColor };
+        var btnDownload = new Button
+        {
+            Width = 200,
+            Height = 30,
+            Location = new Point(0, y),
+            FlatStyle = FlatStyle.Flat,
+            ForeColor = _textColor,
+            BackColor = _sidebarColor,
+            AccessibleName = "Translation.ModelDownload"
+        };
         var progressDownload = new ProgressBar { Width = 280, Height = 10, Location = new Point(220, y + 10), Visible = false };
         var btnCancelDownload = new Button
         {
@@ -1451,18 +1491,22 @@ public class SettingsForm : Form
             Visible = false
         };
         CancellationTokenSource? activeDownloadCancellation = null;
+        var selectedModelIsDownloaded = false;
         
         Action updateDownloadButton = () => {
             string modelType = (cmbModel.SelectedItem as dynamic)?.Id ?? "light";
             var descriptor = OfflineModelCatalog.Get(modelType);
             string path = OfflineModelLocator.GetModelPath(modelType);
             
-            if (downloadService.IsModelDownloaded(path, descriptor)) {
+            selectedModelIsDownloaded = downloadService.IsModelDownloaded(path, descriptor);
+            if (selectedModelIsDownloaded) {
                 btnDownload.Text = _locService.GetString("Settings_ModelDownloaded", "Model Downloaded");
-                btnDownload.Enabled = false;
+                btnDownload.Enabled = true;
+                btnDownload.TabStop = false;
             } else {
                 btnDownload.Text = _locService.GetString("Settings_DownloadModel", "Download Model");
                 btnDownload.Enabled = true;
+                btnDownload.TabStop = true;
             }
         };
 
@@ -1501,7 +1545,7 @@ public class SettingsForm : Form
         
         btnDownload.Click += async (s, e) =>
         {
-            if (activeDownloadCancellation != null)
+            if (activeDownloadCancellation != null || selectedModelIsDownloaded)
                 return;
 
             using var downloadCancellation = CancellationTokenSource.CreateLinkedTokenSource(
