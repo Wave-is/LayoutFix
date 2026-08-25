@@ -132,19 +132,22 @@ public class LayoutConverter : ILayoutConverter
 
         var index = Enumerable.Range(0, activeLayouts.Count)
             .First(i => ReferenceEquals(activeLayouts[i], sourceLayout));
-        var targetLayout = Enumerable.Range(1, activeLayouts.Count - 1)
-            .Select(offset => activeLayouts[(index + offset) % activeLayouts.Count])
-            .FirstOrDefault(candidate => !KeyboardLayoutIdentity.SameLanguage(
-                candidate.Code,
-                sourceLayout.Code));
-        if (targetLayout == null)
-            return (null, null, null);
+        foreach (var targetLayout in Enumerable.Range(1, activeLayouts.Count - 1)
+                     .Select(offset => activeLayouts[(index + offset) % activeLayouts.Count])
+                     .Where(candidate => !KeyboardLayoutIdentity.SameLanguage(
+                         candidate.Code,
+                         sourceLayout.Code)))
+        {
+            var converted = ConvertTo(text, targetLayout, sourceLayout);
+            if (!string.Equals(converted, text, StringComparison.Ordinal))
+                return (converted, sourceLayout, targetLayout);
+        }
 
-        var converted = ConvertTo(text, targetLayout, sourceLayout);
-        if (string.Equals(converted, text, StringComparison.Ordinal))
-            return (null, null, null);
-
-        return (converted, sourceLayout, targetLayout);
+        // Closely related layouts can produce an identical visible value for
+        // many physical-key sequences (for example Russian -> Ukrainian). A
+        // manual correction must continue to the next configured layout rather
+        // than report a false "no change" after inspecting only that sibling.
+        return (null, null, null);
     }
 
     private static bool IsSameLayoutCulture(Layout layout, string? currentLayoutCode)

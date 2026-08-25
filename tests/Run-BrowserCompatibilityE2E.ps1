@@ -202,6 +202,39 @@ for ($iteration = 1; $iteration -le $Runs; $iteration++) {
     Remove-IsolatedBrowserProfiles
 }
 
+# Russian and Ukrainian share many physical-key outputs. The old fallback
+# stopped at the first RU -> UA candidate even when it produced no visible
+# change, so ordinary six-letter words failed with LF-HK-005. Exercise the
+# explicit, caret and held-Shift paths with such a word in real Chromium.
+$siblingCases = @(
+    @{ Browser = 'edge'; Modes = @('sibling'); Label = 'selected' },
+    @{ Browser = 'chrome'; Modes = @('caret', 'sibling'); Label = 'caret' },
+    @{ Browser = 'chrome'; Modes = @('holdshift', 'sibling'); Label = 'held-shift' }
+)
+foreach ($siblingCase in $siblingCases) {
+    for ($iteration = 1; $iteration -le $Runs; $iteration++) {
+        if (Test-Path $resultPath) {
+            Remove-Item -LiteralPath $resultPath -Force
+        }
+        & $harness "--$($siblingCase.Browser)-test" 'input' @($siblingCase.Modes)
+        $exitCode = $LASTEXITCODE
+        $details = if (Test-Path $resultPath) {
+            Get-Content $resultPath -Raw
+        } else {
+            'The harness did not create a result log.'
+        }
+        if ($exitCode -ne 0 -or
+            -not $details.Contains('noOpSiblingLayout=True') -or
+            -not $details.Contains('browser-first-press:success=True') -or
+            -not $details.Contains('Reason=layout-fallback') -or
+            -not $details.Contains('SourceLayout=ru-RU; TargetLayout=en-US')) {
+            Remove-IsolatedBrowserProfiles
+            throw "$($siblingCase.Browser) no-op sibling $($siblingCase.Label) iteration $iteration/$Runs failed with exit code $exitCode.`n$details"
+        }
+        Remove-IsolatedBrowserProfiles
+    }
+}
+
 $profileLeaks = @(
     Get-ChildItem `
         -LiteralPath $temporaryRoot `
@@ -215,4 +248,4 @@ if ($profileLeaks.Count -ne 0) {
     throw "Browser compatibility E2E left isolated profiles: $($profileLeaks.FullName -join ', ')"
 }
 
-Write-Output "browser_compatibility=pass edge_runs=$Runs chrome_runs=$Runs targets=input,textarea,contenteditable chrome_caret_runs=$Runs chrome_duplicate_contenteditable=$Runs chrome_shift_scroll_held_runs=$Runs first_attempt_only=true latency_gate_ms=1000"
+Write-Output "browser_compatibility=pass edge_runs=$Runs chrome_runs=$Runs targets=input,textarea,contenteditable chrome_caret_runs=$Runs chrome_duplicate_contenteditable=$Runs chrome_shift_scroll_held_runs=$Runs no_op_sibling_layout_runs=$($Runs * $siblingCases.Count) first_attempt_only=true latency_gate_ms=1000"

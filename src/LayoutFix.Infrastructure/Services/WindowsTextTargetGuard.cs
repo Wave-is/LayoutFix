@@ -312,6 +312,69 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
         }
     }
 
+    public async Task<TextSelectionReadResult> TryReadSelectedTextAsync(
+        ActiveWindowContext context,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!context.IsValid || !_activeWindow.IsSameActiveWindow(context) ||
+            !_selectionProbeGate.Wait(0))
+        {
+            return TextSelectionReadResult.Unsupported;
+        }
+
+        var releaseGate = true;
+        try
+        {
+            var probeTask = Task.Run(
+                () => ProbeAutomationSelectedText(context),
+                CancellationToken.None);
+            var completed = await Task.WhenAny(
+                probeTask,
+                Task.Delay(
+                    TimeSpan.FromMilliseconds(SelectionProbeTimeoutMilliseconds),
+                    cancellationToken));
+            if (completed != probeTask)
+            {
+                releaseGate = false;
+                _ = probeTask.ContinueWith(
+                    task =>
+                    {
+                        _ = task.Exception;
+                        _selectionProbeGate.Release();
+                    },
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+                cancellationToken.ThrowIfCancellationRequested();
+                LogSupportDiagnostic(
+                    "observed",
+                    "selection-text",
+                    $"Probe=uia; Supported=False; TimeoutMs={SelectionProbeTimeoutMilliseconds}");
+                return TextSelectionReadResult.Unsupported;
+            }
+
+            var result = await probeTask;
+            if (!_activeWindow.IsSameActiveWindow(context))
+                result = TextSelectionReadResult.Unsupported;
+            LogSupportDiagnostic(
+                "observed",
+                "selection-text",
+                $"Probe=uia; Supported={result.IsSupported}; Length={result.Text?.Length ?? 0}");
+            return result;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogError("Text selection read probe failed", exception);
+            return TextSelectionReadResult.Unsupported;
+        }
+        finally
+        {
+            if (releaseGate)
+                _selectionProbeGate.Release();
+        }
+    }
+
     private void CompleteTimedOutProbe(Task<bool> probeTask)
     {
         try
@@ -548,6 +611,23 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
         return string.IsNullOrEmpty(selections[0].GetText(1))
             ? TextSelectionAvailability.None
             : TextSelectionAvailability.Present;
+    }
+
+    private static TextSelectionReadResult ProbeAutomationSelectedText(
+        ActiveWindowContext context)
+    {
+        var element = AutomationElement.FocusedElement;
+        if (element == null || element.Current.ProcessId != context.ProcessId ||
+            !element.TryGetCurrentPattern(TextPattern.Pattern, out var patternObject) ||
+            patternObject is not TextPattern textPattern)
+        {
+            return TextSelectionReadResult.Unsupported;
+        }
+
+        var selections = textPattern.GetSelection();
+        return selections.Length == 1
+            ? TextSelectionReadResult.Captured(selections[0].GetText(-1))
+            : TextSelectionReadResult.Unsupported;
     }
 
     internal static bool IsWritableNativeEditStyle(long style) =>

@@ -635,20 +635,47 @@ public class HotkeyCoordinator : IHotkeyCoordinator
             case HotkeyAction.FixLayout:
             case HotkeyAction.FixLayoutSelected:
                 string currentLayout = _activeWindowProvider.GetActiveLayoutCode();
+                var dictionaryAttempted = _dictionaryAnalyzer != null && IsDictionaryWord(text);
                 if (_dictionaryAnalyzer != null &&
-                    IsDictionaryWord(text) &&
+                    dictionaryAttempted &&
                     _dictionaryAnalyzer.TryGetCorrection(
                         text,
                         currentLayout,
                         out var dictionarySuggestion))
                 {
+                    LogLayoutAnalysis(
+                        action,
+                        text,
+                        currentLayout,
+                        dictionaryAttempted,
+                        dictionaryAccepted: true,
+                        sourceLayout: currentLayout,
+                        targetLayout: dictionarySuggestion.TargetLayoutCode,
+                        changed: !string.Equals(
+                            dictionarySuggestion.Replacement,
+                            text,
+                            StringComparison.Ordinal),
+                        reason: "dictionary-candidate");
                     return (
                         dictionarySuggestion.Replacement,
                         dictionarySuggestion.TargetLayoutCode);
                 }
 
                 var activeLayouts = _keyboardLayoutManager.GetLayoutOrder(currentLayout);
-                var (converted, _, targetLayout) = _layoutConverter.AutoConvert(text, activeLayouts, currentLayout);
+                var (converted, sourceLayout, targetLayout) = _layoutConverter.AutoConvert(
+                    text,
+                    activeLayouts,
+                    currentLayout);
+                LogLayoutAnalysis(
+                    action,
+                    text,
+                    currentLayout,
+                    dictionaryAttempted,
+                    dictionaryAccepted: false,
+                    sourceLayout: sourceLayout?.EffectiveIdentifier,
+                    targetLayout: targetLayout?.EffectiveIdentifier,
+                    changed: converted != null && !string.Equals(converted, text, StringComparison.Ordinal),
+                    reason: converted == null ? "no-visible-candidate" : "layout-fallback");
                 return (converted, targetLayout?.EffectiveIdentifier);
             case HotkeyAction.ChangeCase:
                 return (_textTransformer.ChangeCase(text), null);
@@ -689,6 +716,54 @@ public class HotkeyCoordinator : IHotkeyCoordinator
         text.Any(char.IsLetter) &&
         text.All(character =>
             char.IsLetter(character) || character is '\'' or '’' or '-');
+
+    private void LogLayoutAnalysis(
+        HotkeyAction action,
+        string text,
+        string? currentLayout,
+        bool dictionaryAttempted,
+        bool dictionaryAccepted,
+        string? sourceLayout,
+        string? targetLayout,
+        bool changed,
+        string reason)
+    {
+        _logger.LogInfo(
+            $"SupportDiagnostic: Phase=layout-analysis; " +
+            $"Outcome={(changed ? "accepted" : "rejected")}; Reason={reason}; " +
+            $"Action={action}; Script={DescribeScript(text)}; LetterCount={text.Count(char.IsLetter)}; " +
+            $"CurrentLayout={DescribeLayout(currentLayout)}; " +
+            $"DictionaryAttempted={dictionaryAttempted}; DictionaryAccepted={dictionaryAccepted}; " +
+            $"SourceLayout={DescribeLayout(sourceLayout)}; TargetLayout={DescribeLayout(targetLayout)}.");
+    }
+
+    private static string DescribeLayout(string? identifierOrCode) =>
+        string.IsNullOrWhiteSpace(identifierOrCode)
+            ? "none"
+            : KeyboardLayoutIdentity.GetCultureCode(identifierOrCode);
+
+    private static string DescribeScript(string text)
+    {
+        var hasLatin = false;
+        var hasCyrillic = false;
+        var hasOther = false;
+        foreach (var character in text.Where(char.IsLetter))
+        {
+            if (character is >= '\u0041' and <= '\u024F')
+                hasLatin = true;
+            else if (character is >= '\u0400' and <= '\u052F')
+                hasCyrillic = true;
+            else
+                hasOther = true;
+        }
+
+        var scriptCount = (hasLatin ? 1 : 0) + (hasCyrillic ? 1 : 0) + (hasOther ? 1 : 0);
+        if (scriptCount == 0) return "none";
+        if (scriptCount > 1) return "mixed";
+        if (hasLatin) return "latin";
+        if (hasCyrillic) return "cyrillic";
+        return "other";
+    }
 
     public void Dispose()
     {

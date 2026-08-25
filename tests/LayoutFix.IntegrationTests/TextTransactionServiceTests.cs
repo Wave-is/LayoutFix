@@ -110,6 +110,53 @@ public class TextTransactionServiceTests
     }
 
     [Fact]
+    public async Task AccessibilitySelection_CapturesAndVerifiesWithoutClipboard()
+    {
+        var clipboard = new FakeClipboardService("user clipboard payload");
+        var input = new FakeInputInjector(clipboard);
+        var guard = new SelectedTextTargetGuard("ghbdtn", "ghbdtn");
+        var service = new TextTransactionService(
+            input,
+            clipboard,
+            new FakeActiveWindowProvider(),
+            new NullLogger(),
+            guard);
+
+        var selection = await service.CaptureAsync(allowPreviousWordFallback: false);
+        var replaced = await service.ReplaceAsync(selection!, "привет");
+
+        Assert.True(replaced);
+        Assert.Equal("ghbdtn", selection!.Text);
+        Assert.Equal("привет", input.SentText);
+        Assert.Equal(0, clipboard.CaptureCount);
+        Assert.Equal("user clipboard payload", clipboard.Value);
+    }
+
+    [Fact]
+    public async Task AccessibilitySelection_UsesPreviousWordFallbackWithoutClipboard()
+    {
+        var clipboard = new FakeClipboardService("user clipboard payload");
+        var input = new FakeInputInjector(clipboard);
+        var guard = new SelectedTextTargetGuard(null, "ghbdtn", "ghbdtn");
+        var service = new TextTransactionService(
+            input,
+            clipboard,
+            new FakeActiveWindowProvider(),
+            new NullLogger(),
+            guard);
+
+        var selection = await service.CaptureAsync(allowPreviousWordFallback: true);
+        var replaced = await service.ReplaceAsync(selection!, "привет");
+
+        Assert.True(replaced);
+        Assert.True(selection!.WasSelectedByFallback);
+        Assert.Equal(1, input.SelectWordCount);
+        Assert.Equal("привет", input.SentText);
+        Assert.Equal(0, clipboard.CaptureCount);
+        Assert.Equal("user clipboard payload", clipboard.Value);
+    }
+
+    [Fact]
     public async Task ApplicableDirectAdapter_UsesPreviousWordFallbackWithoutClipboard()
     {
         var clipboard = new FakeClipboardService("complex user clipboard payload");
@@ -652,6 +699,26 @@ public class TextTransactionServiceTests
             ActiveWindowContext context,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(availability);
+    }
+
+    private sealed class SelectedTextTargetGuard(params string?[] selections) : ITextTargetGuard
+    {
+        private readonly Queue<string?> _selections = new(selections);
+
+        public Task<bool> CanModifyAsync(
+            ActiveWindowContext context,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(true);
+
+        public Task<TextSelectionReadResult> TryReadSelectedTextAsync(
+            ActiveWindowContext context,
+            CancellationToken cancellationToken = default)
+        {
+            var selection = _selections.Count > 1
+                ? _selections.Dequeue()
+                : _selections.Peek();
+            return Task.FromResult(TextSelectionReadResult.Captured(selection));
+        }
     }
 
     private sealed class FakeDirectTextAdapter(

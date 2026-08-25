@@ -111,4 +111,36 @@ public class AutoDetectionTests
         Assert.Equal("ф", text);
         Assert.Same(target, selectedTarget);
     }
+
+    [Fact]
+    public void AutoDetect_SkipsVisibleNoOpSiblingAndUsesNextLayout()
+    {
+        var english = new Layout
+        {
+            Code = "en-US",
+            Identifier = "en-US@04090409",
+            Keys = new Dictionary<string, string> { ["a"] = "a", ["b"] = "b" }
+        };
+        var russian = new Layout
+        {
+            Code = "ru-RU",
+            Identifier = "ru-RU@04190419",
+            Keys = new Dictionary<string, string> { ["a"] = "п", ["b"] = "р" }
+        };
+        var ukrainian = new Layout
+        {
+            Code = "uk-UA",
+            Identifier = "uk-UA@04220422",
+            Keys = new Dictionary<string, string> { ["a"] = "п", ["b"] = "р" }
+        };
+
+        var (text, source, target) = new LayoutConverter().AutoConvert(
+            "пр",
+            [english, russian, ukrainian],
+            russian.Identifier);
+
+        Assert.Equal("ab", text);
+        Assert.Same(russian, source);
+        Assert.Same(english, target);
+    }
 }

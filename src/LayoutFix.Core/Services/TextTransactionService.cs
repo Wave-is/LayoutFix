@@ -160,24 +160,33 @@ public sealed class TextTransactionService : ITextTransactionService
                 }
             }
 
-            using var snapshot = await _clipboard.CaptureAsync(cancellationToken);
-            _logger.LogInfo("Clipboard snapshot captured for text capture.");
-            string? selectedText;
-            try
-            {
-                var selectionAvailability = allowPreviousWordFallback && _targetGuard != null
+            var selectionRead = _targetGuard != null
+                ? await _targetGuard.TryReadSelectedTextAsync(window, cancellationToken)
+                : TextSelectionReadResult.Unsupported;
+            var selectionAvailability = selectionRead.IsSupported
+                ? string.IsNullOrEmpty(selectionRead.Text)
+                    ? TextSelectionAvailability.None
+                    : TextSelectionAvailability.Present
+                : allowPreviousWordFallback && _targetGuard != null
                     ? await _targetGuard.GetSelectionAvailabilityAsync(
                         window,
                         cancellationToken)
                     : TextSelectionAvailability.Unknown;
-                LogSupportDiagnostic(
-                    captureId,
-                    "capture",
-                    "observed",
-                    "selection-availability",
-                    $"Availability={selectionAvailability}");
+            LogSupportDiagnostic(
+                captureId,
+                "capture",
+                "observed",
+                "selection-availability",
+                $"Availability={selectionAvailability}; DirectText={selectionRead.IsSupported}");
 
-                if (selectionAvailability == TextSelectionAvailability.None)
+            string? selectedText = selectionRead.Text;
+            if (selectionAvailability == TextSelectionAvailability.None)
+            {
+                if (!allowPreviousWordFallback)
+                {
+                    selectedText = null;
+                }
+                else
                 {
                     if (InputChanged(captureInputGeneration) ||
                         !_activeWindow.IsSameActiveWindow(window))
@@ -188,12 +197,23 @@ public sealed class TextTransactionService : ITextTransactionService
 
                     await _input.SelectWordLeftAsync();
                     fallbackSelectionMade = true;
-                    selectedText = await CopySelectionAsync(window, cancellationToken);
+                    selectionRead = _targetGuard != null
+                        ? await _targetGuard.TryReadSelectedTextAsync(window, cancellationToken)
+                        : TextSelectionReadResult.Unsupported;
+                    selectedText = selectionRead.Text;
                 }
-                else
+            }
+
+            if (!selectionRead.IsSupported)
+            {
+                using var snapshot = await _clipboard.CaptureAsync(cancellationToken);
+                _logger.LogInfo("Clipboard snapshot captured for text capture.");
+                try
                 {
                     selectedText = await CopySelectionAsync(window, cancellationToken);
-                    if (string.IsNullOrEmpty(selectedText) && allowPreviousWordFallback)
+                    if (string.IsNullOrEmpty(selectedText) &&
+                        allowPreviousWordFallback &&
+                        !fallbackSelectionMade)
                     {
                         if (InputChanged(captureInputGeneration) ||
                             !_activeWindow.IsSameActiveWindow(window))
@@ -206,15 +226,19 @@ public sealed class TextTransactionService : ITextTransactionService
                         fallbackSelectionMade = true;
                         selectedText = await CopySelectionAsync(window, cancellationToken);
                     }
+                    _logger.LogInfo("Selection copy completed for text capture.");
                 }
-                _logger.LogInfo("Selection copy completed for text capture.");
+                finally
+                {
+                    // Restoration is deliberately uncancellable: once Ctrl+C has changed
+                    // the clipboard, returning it to the user takes precedence.
+                    await _clipboard.RestoreAsync(snapshot, CancellationToken.None);
+                    _logger.LogInfo("Clipboard snapshot restored after text capture.");
+                }
             }
-            finally
+            else
             {
-                // Restoration is deliberately uncancellable: once Ctrl+C has changed
-                // the clipboard, returning it to the user takes precedence.
-                await _clipboard.RestoreAsync(snapshot, CancellationToken.None);
-                _logger.LogInfo("Clipboard snapshot restored after text capture.");
+                _logger.LogInfo("Selection read directly through UI Automation for text capture.");
             }
 
             if (string.IsNullOrEmpty(selectedText))
@@ -226,7 +250,7 @@ public sealed class TextTransactionService : ITextTransactionService
                         captureInputGeneration,
                         cancellationToken);
                 }
-                LogSupportDiagnostic(captureId, "capture", "rejected", "clipboard-copy-returned-no-text");
+                LogSupportDiagnostic(captureId, "capture", "rejected", "selection-read-returned-no-text");
                 return null;
             }
 
@@ -379,18 +403,32 @@ public sealed class TextTransactionService : ITextTransactionService
         {
             // Long translations can finish after the user has moved the caret. Verify
             // that the exact original selection still exists before replacing it.
-            using var snapshot = await _clipboard.CaptureAsync(cancellationToken);
-            _logger.LogInfo("Clipboard snapshot captured for replacement verification.");
+            var selectionRead = _targetGuard != null
+                ? await _targetGuard.TryReadSelectedTextAsync(
+                    selection.Window,
+                    cancellationToken)
+                : TextSelectionReadResult.Unsupported;
             string? currentSelection;
-            try
+            if (selectionRead.IsSupported)
             {
-                currentSelection = await CopySelectionAsync(selection.Window, cancellationToken);
-                _logger.LogInfo("Selection copy completed for replacement verification.");
+                currentSelection = selectionRead.Text;
+                _logger.LogInfo(
+                    "Selection read directly through UI Automation for replacement verification.");
             }
-            finally
+            else
             {
-                await _clipboard.RestoreAsync(snapshot, CancellationToken.None);
-                _logger.LogInfo("Clipboard snapshot restored after replacement verification.");
+                using var snapshot = await _clipboard.CaptureAsync(cancellationToken);
+                _logger.LogInfo("Clipboard snapshot captured for replacement verification.");
+                try
+                {
+                    currentSelection = await CopySelectionAsync(selection.Window, cancellationToken);
+                    _logger.LogInfo("Selection copy completed for replacement verification.");
+                }
+                finally
+                {
+                    await _clipboard.RestoreAsync(snapshot, CancellationToken.None);
+                    _logger.LogInfo("Clipboard snapshot restored after replacement verification.");
+                }
             }
 
             var inputChangedDuringVerification = InputChanged(selectionInputGeneration);

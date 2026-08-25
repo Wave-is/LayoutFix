@@ -8,7 +8,7 @@
     <!-- Keep Windows file metadata aligned across the tray process, shared
          libraries and the isolated translation worker. The installer consumes
          the same release version from installer.iss/release workflow. -->
-    <Version>1.0.21-preview.1</Version>
+    <Version>1.0.21-preview.2</Version>
     <AssemblyVersion>1.0.21.0</AssemblyVersion>
     <FileVersion>1.0.21.0</FileVersion>
   </PropertyGroup>

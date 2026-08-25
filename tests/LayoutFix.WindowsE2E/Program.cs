@@ -199,6 +199,7 @@ internal static class Program
         var duplicateBrowserHotkeyDuringAction = false;
         var browserCaretFallbackTest = false;
         var holdHotkeyModifiersDuringAction = false;
+        var browserNoOpSiblingLayoutTest = false;
         var partialReplacementTest = false;
         var partialReplacementInputRaceTest = false;
         var partialReplacementMouseRaceTest = false;
@@ -279,6 +280,8 @@ internal static class Program
                     browserCaretFallbackTest = true;
                 else if (string.Equals(browserMode, "holdshift", StringComparison.OrdinalIgnoreCase))
                     holdHotkeyModifiersDuringAction = true;
+                else if (string.Equals(browserMode, "sibling", StringComparison.OrdinalIgnoreCase))
+                    browserNoOpSiblingLayoutTest = true;
                 else
                     return 64;
             }
@@ -318,7 +321,8 @@ internal static class Program
                 $"browser-host={browserKind};target={browserTargetKind};isolatedProfile=True;" +
                 $"duplicateHotkey={duplicateBrowserHotkeyDuringAction};" +
                 $"caretFallback={browserCaretFallbackTest};" +
-                $"holdModifiers={holdHotkeyModifiersDuringAction}");
+                $"holdModifiers={holdHotkeyModifiersDuringAction};" +
+                $"noOpSiblingLayout={browserNoOpSiblingLayoutTest}");
         AppendResult(
             $"physical-hotkey:configured={configuredHotkey};vk=0x{configuredHotkeyVirtualKey:X2}");
 
@@ -541,6 +545,9 @@ internal static class Program
 
                 originalClipboard = await clipboard.CaptureAsync();
                 AppendResult("clipboard:captured");
+                var browserManualCase = browserNoOpSiblingLayoutTest
+                    ? new ManualCorrectionCase("no-op-sibling", "просто", "ghjcnj")
+                    : new ManualCorrectionCase("default", "ghbdtn", "привет");
                 if (existingTextAppWindow != IntPtr.Zero)
                 {
                     // Browser contenteditable controls may retain the real DOM focus
@@ -591,7 +598,7 @@ internal static class Program
                     existingTargetModified = true;
                     if (!await textTransaction.ReplaceAsync(
                         originalTargetSelection!,
-                        "ghbdtn"))
+                        browserManualCase.Input))
                     {
                         throw new InvalidOperationException(
                             "The compatibility sentinel could not be replaced through the production transaction.");
@@ -607,7 +614,7 @@ internal static class Program
                 {
                     var manualCase = manualCorrectionMatrix
                         ? ManualCorrectionCases[iteration - 1]
-                        : new ManualCorrectionCase("default", "ghbdtn", "привет");
+                        : browserManualCase;
                     if (manualCorrectionMatrix)
                     {
                         AppendResult(
@@ -1270,6 +1277,36 @@ internal static class Program
             try
             {
                 _process.Refresh();
+                var focusedElement = AutomationElement.FocusedElement;
+                if (focusedElement != null &&
+                    (int)focusedElement.GetCurrentPropertyValue(
+                        AutomationElement.ProcessIdProperty,
+                        ignoreDefaultValue: true) == _process.Id)
+                {
+                    if (focusedElement.TryGetCurrentPattern(
+                            ValuePattern.Pattern,
+                            out var valuePatternObject) &&
+                        valuePatternObject is ValuePattern valuePattern)
+                    {
+                        text = valuePattern.Current.Value;
+                        return true;
+                    }
+
+                    if (focusedElement.TryGetCurrentPattern(
+                            TextPattern.Pattern,
+                            out var textPatternObject) &&
+                        textPatternObject is TextPattern textPattern)
+                    {
+                        text = textPattern.DocumentRange.GetText(-1);
+                        return true;
+                    }
+                }
+
+                // The title remains a browser-independent fallback for
+                // contenteditable implementations whose focused element does
+                // not expose ValuePattern/TextPattern. Prefer the direct UIA
+                // value above so the latency gate measures visible text rather
+                // than Chromium's occasionally delayed MainWindowTitle cache.
                 const string marker = "|value=";
                 var title = _process.MainWindowTitle;
                 var markerIndex = title.IndexOf(marker, StringComparison.Ordinal);

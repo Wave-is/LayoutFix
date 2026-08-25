@@ -89,6 +89,36 @@ public class UIAutomationTests
     }
 
     [Fact]
+    public async Task FixLayout_LogsPrivacySafeDecisionWithoutCapturedText()
+    {
+        var logger = new RecordingLogger();
+        using var coordinator = new HotkeyCoordinator(
+            new FakeKeyboardHook(),
+            new RecordingTextTransactionService("ghbdtn"),
+            new FakeSettingsService(),
+            new FakeKeyboardLayoutManager(),
+            new LayoutConverter(),
+            new TextTransformer(),
+            new TransliterationService(),
+            new NumberToTextConverter(),
+            logger,
+            new RecordingActiveWindowProvider(),
+            new NullSoundService(),
+            new FakeTranslationCoordinator(),
+            new NullTranslatorWindowProvider());
+
+        await coordinator.ExecuteActionAsync(HotkeyAction.FixLayout);
+
+        var diagnostic = Assert.Single(logger.Infos, message =>
+            message.Contains("Phase=layout-analysis", StringComparison.Ordinal));
+        Assert.Contains("Script=latin", diagnostic, StringComparison.Ordinal);
+        Assert.Contains("LetterCount=6", diagnostic, StringComparison.Ordinal);
+        Assert.Contains("Reason=layout-fallback", diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain("ghbdtn", diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain("привет", diagnostic, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ConcurrentActions_AreQueuedAndNoneAreSilentlyDropped()
     {
         var transaction = new RecordingTextTransactionService("hello");
