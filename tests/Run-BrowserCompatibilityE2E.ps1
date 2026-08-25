@@ -75,7 +75,7 @@ function Remove-IsolatedBrowserProfiles {
     }
 }
 
-$maximumAttempts = 3
+$maximumAttempts = 1
 Remove-IsolatedBrowserProfiles
 foreach ($browser in @('edge', 'chrome')) {
     foreach ($target in @('input', 'textarea', 'contenteditable')) {
@@ -150,6 +150,58 @@ for ($iteration = 1; $iteration -le $Runs; $iteration++) {
     }
 }
 
+# The primary Scroll Lock workflow must also correct the previous word when
+# there is no selection. This used to spend three 750 ms clipboard timeouts
+# before even attempting the fallback, which made one press look unreliable.
+foreach ($target in @('input', 'textarea', 'contenteditable')) {
+    for ($iteration = 1; $iteration -le $Runs; $iteration++) {
+        if (Test-Path $resultPath) {
+            Remove-Item -LiteralPath $resultPath -Force
+        }
+        & $harness '--chrome-test' $target 'caret'
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) {
+            $details = if (Test-Path $resultPath) {
+                Get-Content $resultPath -Raw
+            } else {
+                'The harness did not create a result log.'
+            }
+            Remove-IsolatedBrowserProfiles
+            throw "chrome $target caret iteration $iteration/$Runs failed on the first attempt with exit code $exitCode.`n$details"
+        }
+        Remove-IsolatedBrowserProfiles
+    }
+}
+
+# Shift+Scroll is dispatched while Shift is still physically down. The
+# production transaction must neutralize that modifier around its private
+# Ctrl+C/replacement input and finish before the user releases Shift. Keep the
+# modifier down beyond the historical two-second timeout after success so this
+# gate cannot pass through the old wait-for-release behavior.
+for ($iteration = 1; $iteration -le $Runs; $iteration++) {
+    if (Test-Path $resultPath) {
+        Remove-Item -LiteralPath $resultPath -Force
+    }
+    & $harness '--chrome-test' 'input' 'holdshift'
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        $details = if (Test-Path $resultPath) {
+            Get-Content $resultPath -Raw
+        } else {
+            'The harness did not create a result log.'
+        }
+        Remove-IsolatedBrowserProfiles
+        throw "chrome Shift+Scroll held-modifier iteration $iteration/$Runs failed on the first attempt with exit code $exitCode.`n$details"
+    }
+    $heldEvidence = Get-Content -LiteralPath $resultPath -Raw
+    if (-not $heldEvidence.Contains('modifiersHeld=True') -or
+        -not $heldEvidence.Contains('browser-hotkey:shift-held-after-success-ms=2200')) {
+        Remove-IsolatedBrowserProfiles
+        throw "chrome Shift+Scroll held-modifier iteration $iteration/$Runs did not emit the required evidence.`n$heldEvidence"
+    }
+    Remove-IsolatedBrowserProfiles
+}
+
 $profileLeaks = @(
     Get-ChildItem `
         -LiteralPath $temporaryRoot `
@@ -163,4 +215,4 @@ if ($profileLeaks.Count -ne 0) {
     throw "Browser compatibility E2E left isolated profiles: $($profileLeaks.FullName -join ', ')"
 }
 
-Write-Output "browser_compatibility=pass edge_runs=$Runs chrome_runs=$Runs targets=input,textarea,contenteditable chrome_duplicate_contenteditable=$Runs"
+Write-Output "browser_compatibility=pass edge_runs=$Runs chrome_runs=$Runs targets=input,textarea,contenteditable chrome_caret_runs=$Runs chrome_duplicate_contenteditable=$Runs chrome_shift_scroll_held_runs=$Runs first_attempt_only=true latency_gate_ms=1000"

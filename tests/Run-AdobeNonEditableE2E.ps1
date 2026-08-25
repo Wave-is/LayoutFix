@@ -312,7 +312,9 @@ try {
                         $startedProcess.MainWindowTitle -like "*$($target.WindowName)*"
                 }
                 else {
-                    $_.Current.Name -like "*$($target.WindowName)*"
+                    $startedProcess.MainWindowHandle -ne 0 -and
+                        $_.Current.NativeWindowHandle -eq $startedProcess.MainWindowHandle -and
+                        $_.Current.Name -like "*$($target.WindowName)*"
                 }
             }
             catch {

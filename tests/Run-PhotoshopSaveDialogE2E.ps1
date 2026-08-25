@@ -68,6 +68,21 @@ public static class LayoutFixPhotoshopInput
     private static extern bool SetForegroundWindow(IntPtr window);
 
     [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint attachThread, uint attachToThread, bool attach);
+
+    [DllImport("user32.dll")]
     private static extern void keybd_event(
         byte virtualKey,
         byte scanCode,
@@ -77,12 +92,33 @@ public static class LayoutFixPhotoshopInput
     public static bool OpenSaveAs(IntPtr window)
     {
         ShowWindowAsync(window, SwRestore);
-        if (!SetForegroundWindow(window))
+        var foreground = GetForegroundWindow();
+        var callerThread = GetCurrentThreadId();
+        var foregroundThread = foreground == IntPtr.Zero
+            ? 0
+            : GetWindowThreadProcessId(foreground, out _);
+        var targetThread = GetWindowThreadProcessId(window, out _);
+        var attachedForeground = foregroundThread != 0 && foregroundThread != callerThread &&
+            AttachThreadInput(callerThread, foregroundThread, true);
+        var attachedTarget = targetThread != 0 && targetThread != callerThread &&
+            targetThread != foregroundThread && AttachThreadInput(callerThread, targetThread, true);
+        try
         {
-            return false;
+            BringWindowToTop(window);
+            SetForegroundWindow(window);
+            Thread.Sleep(300);
+        }
+        finally
+        {
+            if (attachedTarget)
+                AttachThreadInput(callerThread, targetThread, false);
+            if (attachedForeground)
+                AttachThreadInput(callerThread, foregroundThread, false);
         }
 
-        Thread.Sleep(300);
+        if (GetForegroundWindow() != window)
+            return false;
+
         keybd_event(VkControl, 0, 0, UIntPtr.Zero);
         keybd_event(VkShift, 0, 0, UIntPtr.Zero);
         keybd_event(VkS, 0, 0, UIntPtr.Zero);

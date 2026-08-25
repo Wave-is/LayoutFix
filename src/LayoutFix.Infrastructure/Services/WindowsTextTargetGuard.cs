@@ -16,10 +16,12 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
 {
     private const int ProbeTimeoutMilliseconds = 800;
     private const int ChromiumProbeTimeoutMilliseconds = 2_500;
+    private const int SelectionProbeTimeoutMilliseconds = 300;
     private static readonly TimeSpan BusyWarningThrottle = TimeSpan.FromSeconds(2);
     private readonly IActiveWindowProvider _activeWindow;
     private readonly ILoggerService _logger;
     private readonly SemaphoreSlim _probeGate = new(1, 1);
+    private readonly SemaphoreSlim _selectionProbeGate = new(1, 1);
     private readonly Func<ActiveWindowContext, bool> _probe;
     private readonly Func<nint, bool?> _nativeProbe;
     private readonly Func<uint, TargetInputAccess> _integrityProbe;
@@ -232,6 +234,84 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
         }
     }
 
+    public async Task<TextSelectionAvailability> GetSelectionAvailabilityAsync(
+        ActiveWindowContext context,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!context.IsValid || !_activeWindow.IsSameActiveWindow(context))
+            return TextSelectionAvailability.Unknown;
+
+        if (!_selectionProbeGate.Wait(0))
+            return TextSelectionAvailability.Unknown;
+
+        var releaseGate = true;
+        try
+        {
+            var nativeSelection = ProbeNativeSelection(context.FocusedWindow);
+            if (nativeSelection.HasValue)
+            {
+                var result = nativeSelection.Value
+                    ? TextSelectionAvailability.Present
+                    : TextSelectionAvailability.None;
+                LogSupportDiagnostic(
+                    "observed",
+                    "selection-availability",
+                    $"Probe=native; Availability={result}");
+                return _activeWindow.IsSameActiveWindow(context)
+                    ? result
+                    : TextSelectionAvailability.Unknown;
+            }
+
+            var probeTask = Task.Run(
+                () => ProbeAutomationSelection(context),
+                CancellationToken.None);
+            var completed = await Task.WhenAny(
+                probeTask,
+                Task.Delay(
+                    TimeSpan.FromMilliseconds(SelectionProbeTimeoutMilliseconds),
+                    cancellationToken));
+            if (completed != probeTask)
+            {
+                releaseGate = false;
+                _ = probeTask.ContinueWith(
+                    task =>
+                    {
+                        _ = task.Exception;
+                        _selectionProbeGate.Release();
+                    },
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+                cancellationToken.ThrowIfCancellationRequested();
+                LogSupportDiagnostic(
+                    "observed",
+                    "selection-availability",
+                    $"Probe=uia; Availability=Unknown; TimeoutMs={SelectionProbeTimeoutMilliseconds}");
+                return TextSelectionAvailability.Unknown;
+            }
+
+            var availability = await probeTask;
+            if (!_activeWindow.IsSameActiveWindow(context))
+                availability = TextSelectionAvailability.Unknown;
+            LogSupportDiagnostic(
+                "observed",
+                "selection-availability",
+                $"Probe=uia; Availability={availability}");
+            return availability;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogError("Text selection availability probe failed", exception);
+            return TextSelectionAvailability.Unknown;
+        }
+        finally
+        {
+            if (releaseGate)
+                _selectionProbeGate.Release();
+        }
+    }
+
     private void CompleteTimedOutProbe(Task<bool> probeTask)
     {
         try
@@ -419,6 +499,55 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
             100,
             out var passwordCharacter);
         return sent == IntPtr.Zero ? false : passwordCharacter == IntPtr.Zero;
+    }
+
+    private static bool? ProbeNativeSelection(nint focusedWindow)
+    {
+        if (focusedWindow == 0)
+            return null;
+
+        var className = new StringBuilder(256);
+        if (Win32.GetClassName(focusedWindow, className, className.Capacity) == 0 ||
+            !className.ToString().Contains("Edit", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var sent = Win32.SendMessageTimeout(
+            focusedWindow,
+            Win32.EM_GETSEL,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            Win32.SMTO_BLOCK | Win32.SMTO_ABORTIFHUNG,
+            100,
+            out var selectionResult);
+        if (sent == IntPtr.Zero)
+            return null;
+
+        var packedRange = unchecked((uint)selectionResult.ToInt64());
+        var start = (int)(packedRange & 0xFFFF);
+        var end = (int)(packedRange >> 16);
+        return end > start;
+    }
+
+    private static TextSelectionAvailability ProbeAutomationSelection(
+        ActiveWindowContext context)
+    {
+        var element = AutomationElement.FocusedElement;
+        if (element == null || element.Current.ProcessId != context.ProcessId ||
+            !element.TryGetCurrentPattern(TextPattern.Pattern, out var patternObject) ||
+            patternObject is not TextPattern textPattern)
+        {
+            return TextSelectionAvailability.Unknown;
+        }
+
+        var selections = textPattern.GetSelection();
+        if (selections.Length != 1)
+            return TextSelectionAvailability.Unknown;
+
+        return string.IsNullOrEmpty(selections[0].GetText(1))
+            ? TextSelectionAvailability.None
+            : TextSelectionAvailability.Present;
     }
 
     internal static bool IsWritableNativeEditStyle(long style) =>

@@ -112,10 +112,30 @@ public class HotkeyCoordinator : IHotkeyCoordinator
     public void Initialize()
     {
         _keyboardLayoutManager.LoadAll();
+        WarmUpManualCorrectionPipeline();
         RefreshShortcutBindings();
         LogHotkeyConflicts();
         _keyboardHook.HotkeyPressed += OnHotkeyPressed;
         _bindingRefreshTask ??= Task.Run(RefreshShortcutBindingsLoopAsync);
+    }
+
+    private void WarmUpManualCorrectionPipeline()
+    {
+        try
+        {
+            const string probe = "layoutfixwarmup";
+            var currentLayout = _activeWindowProvider.GetActiveLayoutCode();
+            var activeLayouts = _keyboardLayoutManager.GetLayoutOrder(currentLayout);
+            if (_dictionaryAnalyzer != null)
+                _ = _dictionaryAnalyzer.TryGetCorrection(probe, currentLayout, out _);
+            _ = _layoutConverter.AutoConvert(probe, activeLayouts, currentLayout);
+        }
+        catch (Exception exception)
+        {
+            // Prewarming is an optimization only. A missing layout or dictionary
+            // must not prevent startup; the real action retains its normal path.
+            _logger.LogError("Manual correction pipeline warm-up failed", exception);
+        }
     }
 
     private async Task RefreshShortcutBindingsLoopAsync()

@@ -136,6 +136,28 @@ public class TextTransactionServiceTests
     }
 
     [Fact]
+    public async Task ProvenEmptySelection_UsesFallbackBeforeAnyClipboardCopy()
+    {
+        var clipboard = new FakeClipboardService("user clipboard payload");
+        var input = new FakeInputInjector(clipboard, "ghbdtn");
+        var service = new TextTransactionService(
+            input,
+            clipboard,
+            new FakeActiveWindowProvider(),
+            new NullLogger(),
+            new SelectionAwareTargetGuard(TextSelectionAvailability.None));
+
+        var selection = await service.CaptureAsync(allowPreviousWordFallback: true);
+
+        Assert.NotNull(selection);
+        Assert.Equal("ghbdtn", selection!.Text);
+        Assert.True(selection.WasSelectedByFallback);
+        Assert.Equal(1, input.SelectWordCount);
+        Assert.Equal(1, input.CopyCount);
+        Assert.Equal("user clipboard payload", clipboard.Value);
+    }
+
+    [Fact]
     public async Task CaptureAndReplace_RestoreClipboardAndVerifyOriginalSelection()
     {
         var clipboard = new FakeClipboardService("user clipboard payload");
@@ -547,12 +569,14 @@ public class TextTransactionServiceTests
         public int SelectWordCount { get; private set; }
         public int CollapseSelectionCount { get; private set; }
         public int PasteCount { get; private set; }
+        public int CopyCount { get; private set; }
         public string? PastedText { get; private set; }
 
         public Task SendKeyCombinationAsync(bool ctrl, bool alt, bool shift, string key)
         {
             if (ctrl && key.Equals("c", StringComparison.OrdinalIgnoreCase))
             {
+                CopyCount++;
                 if (ThrowOnCopy) throw new InvalidOperationException("copy failed");
                 clipboard.SimulateCopy(_copiedSelections.Dequeue());
                 if (SelectWordCount > 0)
@@ -614,6 +638,20 @@ public class TextTransactionServiceTests
         public string GetActiveLayoutCode() => "en-US";
         public void SwitchToNextLayout() { }
         public bool TrySwitchToLayout(string layoutCode) => true;
+    }
+
+    private sealed class SelectionAwareTargetGuard(
+        TextSelectionAvailability availability) : ITextTargetGuard
+    {
+        public Task<bool> CanModifyAsync(
+            ActiveWindowContext context,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(true);
+
+        public Task<TextSelectionAvailability> GetSelectionAvailabilityAsync(
+            ActiveWindowContext context,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(availability);
     }
 
     private sealed class FakeDirectTextAdapter(

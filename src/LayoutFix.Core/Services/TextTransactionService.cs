@@ -7,7 +7,10 @@ namespace LayoutFix.Core.Services;
 
 public sealed class TextTransactionService : ITextTransactionService
 {
-    private static readonly TimeSpan CopyTimeout = TimeSpan.FromMilliseconds(750);
+    // A missed clipboard notification must not freeze the primary manual workflow
+    // for 0.75 seconds per retry. Three bounded 250 ms attempts still tolerate a
+    // busy Chromium renderer while keeping the entire retry budget below one second.
+    private static readonly TimeSpan CopyTimeout = TimeSpan.FromMilliseconds(250);
     private const int CopyAttempts = 3;
     // SendInput is materially more reliable than Ctrl+V for ordinary selections:
     // several target UI threads acknowledge the injected paste chord before they
@@ -72,19 +75,23 @@ public sealed class TextTransactionService : ITextTransactionService
         var fallbackSelectionMade = false;
         try
         {
-            await _input.WaitForModifiersReleaseAsync();
+            // The injector atomically neutralizes hotkey modifiers around its
+            // private Ctrl+C/selection/replacement batches. Waiting for Shift
+            // here made Shift+Scroll appear dead for two seconds and then fail
+            // whenever the user held or repeated the shortcut while waiting.
+            cancellationToken.ThrowIfCancellationRequested();
             if (InputChanged(captureInputGeneration))
             {
                 LogInputChanged(
                     captureId,
                     "capture",
-                    "input-changed-after-modifier-release",
+                    "input-changed-before-capture",
                     captureInputGeneration);
                 return null;
             }
             if (!_activeWindow.IsSameActiveWindow(window))
             {
-                LogSupportDiagnostic(captureId, "capture", "rejected", "focus-changed-after-modifier-release");
+                LogSupportDiagnostic(captureId, "capture", "rejected", "focus-changed-before-capture");
                 return null;
             }
 
@@ -158,9 +165,19 @@ public sealed class TextTransactionService : ITextTransactionService
             string? selectedText;
             try
             {
-                selectedText = await CopySelectionAsync(window, cancellationToken);
-                _logger.LogInfo("Selection copy completed for text capture.");
-                if (string.IsNullOrEmpty(selectedText) && allowPreviousWordFallback)
+                var selectionAvailability = allowPreviousWordFallback && _targetGuard != null
+                    ? await _targetGuard.GetSelectionAvailabilityAsync(
+                        window,
+                        cancellationToken)
+                    : TextSelectionAvailability.Unknown;
+                LogSupportDiagnostic(
+                    captureId,
+                    "capture",
+                    "observed",
+                    "selection-availability",
+                    $"Availability={selectionAvailability}");
+
+                if (selectionAvailability == TextSelectionAvailability.None)
                 {
                     if (InputChanged(captureInputGeneration) ||
                         !_activeWindow.IsSameActiveWindow(window))
@@ -173,6 +190,24 @@ public sealed class TextTransactionService : ITextTransactionService
                     fallbackSelectionMade = true;
                     selectedText = await CopySelectionAsync(window, cancellationToken);
                 }
+                else
+                {
+                    selectedText = await CopySelectionAsync(window, cancellationToken);
+                    if (string.IsNullOrEmpty(selectedText) && allowPreviousWordFallback)
+                    {
+                        if (InputChanged(captureInputGeneration) ||
+                            !_activeWindow.IsSameActiveWindow(window))
+                        {
+                            LogSupportDiagnostic(captureId, "capture", "rejected", "context-changed-before-fallback-selection");
+                            return null;
+                        }
+
+                        await _input.SelectWordLeftAsync();
+                        fallbackSelectionMade = true;
+                        selectedText = await CopySelectionAsync(window, cancellationToken);
+                    }
+                }
+                _logger.LogInfo("Selection copy completed for text capture.");
             }
             finally
             {

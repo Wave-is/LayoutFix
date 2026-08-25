@@ -197,6 +197,8 @@ internal static class Program
         string? browserKind = null;
         string? browserTargetKind = null;
         var duplicateBrowserHotkeyDuringAction = false;
+        var browserCaretFallbackTest = false;
+        var holdHotkeyModifiersDuringAction = false;
         var partialReplacementTest = false;
         var partialReplacementInputRaceTest = false;
         var partialReplacementMouseRaceTest = false;
@@ -269,13 +271,26 @@ internal static class Program
             browserTargetKind = args[1].ToLowerInvariant();
             if (browserTargetKind is not ("input" or "textarea" or "contenteditable"))
                 return 64;
-            if (args.Length >= 3)
+            foreach (var browserMode in args.Skip(2))
             {
-                if (!string.Equals(args[2], "duplicate", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(browserMode, "duplicate", StringComparison.OrdinalIgnoreCase))
+                    duplicateBrowserHotkeyDuringAction = true;
+                else if (string.Equals(browserMode, "caret", StringComparison.OrdinalIgnoreCase))
+                    browserCaretFallbackTest = true;
+                else if (string.Equals(browserMode, "holdshift", StringComparison.OrdinalIgnoreCase))
+                    holdHotkeyModifiersDuringAction = true;
+                else
                     return 64;
-                duplicateBrowserHotkeyDuringAction = true;
             }
-            browserHost = BrowserCompatibilityHost.Start(browserKind, browserTargetKind);
+            if (holdHotkeyModifiersDuringAction)
+            {
+                configuredHotkey = "Shift+Scroll";
+                configuredHotkeyVirtualKey = 0x91;
+            }
+            browserHost = BrowserCompatibilityHost.Start(
+                browserKind,
+                browserTargetKind,
+                selectText: !browserCaretFallbackTest);
             existingTextAppWindow = browserHost.MainWindowHandle;
         }
         else if (args.Length >= 1 &&
@@ -301,7 +316,9 @@ internal static class Program
         if (browserTargetKind != null)
             AppendResult(
                 $"browser-host={browserKind};target={browserTargetKind};isolatedProfile=True;" +
-                $"duplicateHotkey={duplicateBrowserHotkeyDuringAction}");
+                $"duplicateHotkey={duplicateBrowserHotkeyDuringAction};" +
+                $"caretFallback={browserCaretFallbackTest};" +
+                $"holdModifiers={holdHotkeyModifiersDuringAction}");
         AppendResult(
             $"physical-hotkey:configured={configuredHotkey};vk=0x{configuredHotkeyVirtualKey:X2}");
 
@@ -314,7 +331,9 @@ internal static class Program
         [
             new HotkeyConfig
             {
-                Action = nameof(HotkeyAction.FixLayoutSelected),
+                Action = (browserCaretFallbackTest
+                    ? HotkeyAction.FixLayout
+                    : HotkeyAction.FixLayoutSelected).ToString(),
                 Hotkey = configuredHotkey,
                 Enabled = true
             }
@@ -345,6 +364,8 @@ internal static class Program
         var layoutManager = new KeyboardLayoutManager(settings, new WindowsLayoutProvider());
         var layoutConverter = new LayoutConverter();
         var dictionaryAnalyzer = new DictionaryAnalyzer(layoutConverter, layoutManager, settings);
+        dictionaryAnalyzer.WarmUp();
+        AppendResult("dictionaries:warmed");
         using var targetGuard = new WindowsTextTargetGuard(activeWindow, logger, settings);
         using var directTextAdapter = new AdobeInlineRenameTextAdapter(
             activeWindow,
@@ -575,7 +596,10 @@ internal static class Program
                         throw new InvalidOperationException(
                             "The compatibility sentinel could not be replaced through the production transaction.");
                     }
-                    SendExternalSelectAll();
+                    if (browserCaretFallbackTest)
+                        SendExternalKeys(0x23); // End: exercise previous-word fallback.
+                    else
+                        SendExternalSelectAll();
                     await Task.Delay(100);
                 }
                 var completedIterations = 0;
@@ -615,15 +639,72 @@ internal static class Program
                     }
                     await SetClipboardSentinelAsync();
 
-                    SendExternalHotkey(configuredHotkey, configuredHotkeyVirtualKey);
-                    if (duplicateBrowserHotkeyDuringAction)
+                    var actionStopwatch = Stopwatch.StartNew();
+                    var heldHotkeyModifiers = Array.Empty<ushort>();
+                    try
                     {
-                        // Reproduce a quick second discrete press while Chromium is
-                        // still completing capture. It must be coalesced without
-                        // invalidating the input-ownership snapshot of the first action.
-                        await Task.Delay(150);
-                        SendExternalHotkey(configuredHotkey, configuredHotkeyVirtualKey);
-                        AppendResult("browser-hotkey:duplicate-sent=True");
+                        heldHotkeyModifiers = holdHotkeyModifiersDuringAction
+                            ? SendExternalHotkeyKeepingModifiersPressed(
+                                configuredHotkey,
+                                configuredHotkeyVirtualKey)
+                            : [];
+                        if (!holdHotkeyModifiersDuringAction)
+                            SendExternalHotkey(configuredHotkey, configuredHotkeyVirtualKey);
+                        if (duplicateBrowserHotkeyDuringAction)
+                        {
+                            // Reproduce a quick second discrete press while Chromium is
+                            // still completing capture. It must be coalesced without
+                            // invalidating the input-ownership snapshot of the first action.
+                            await Task.Delay(150);
+                            SendExternalHotkey(configuredHotkey, configuredHotkeyVirtualKey);
+                            AppendResult("browser-hotkey:duplicate-sent=True");
+                        }
+                        if (browserHost != null)
+                        {
+                            var browserDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+                            var browserObservedText = string.Empty;
+                            while (DateTime.UtcNow < browserDeadline)
+                            {
+                                if (browserHost.TryReadTargetText(out browserObservedText) &&
+                                    string.Equals(
+                                        browserObservedText.TrimEnd('\r', '\n'),
+                                        manualCase.Expected,
+                                        StringComparison.Ordinal))
+                                {
+                                    break;
+                                }
+                                await Task.Delay(10);
+                            }
+                            actionStopwatch.Stop();
+                            var firstPressSucceeded = string.Equals(
+                                browserObservedText.TrimEnd('\r', '\n'),
+                                manualCase.Expected,
+                                StringComparison.Ordinal);
+                            AppendResult(
+                                $"browser-first-press:success={firstPressSucceeded};" +
+                                $"elapsedMs={actionStopwatch.Elapsed.TotalMilliseconds:0};" +
+                                $"caretFallback={browserCaretFallbackTest};" +
+                                $"modifiersHeld={holdHotkeyModifiersDuringAction}");
+                            if (!firstPressSucceeded || actionStopwatch.Elapsed > TimeSpan.FromSeconds(1))
+                            {
+                                throw new InvalidOperationException(
+                                    "The browser target did not complete one-press correction within 1000 ms.");
+                            }
+                            if (holdHotkeyModifiersDuringAction)
+                            {
+                                // Keep Shift physically down beyond the old two-second
+                                // release timeout. The action must already be complete.
+                                await Task.Delay(2_200);
+                                AppendResult("browser-hotkey:shift-held-after-success-ms=2200");
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        foreach (var modifier in heldHotkeyModifiers.Reverse())
+                        {
+                            SendExternalKeyUp(modifier);
+                        }
                     }
                     if (partialInput != null)
                     {
@@ -659,7 +740,7 @@ internal static class Program
                     string targetText;
                     if (existingTextAppWindow != IntPtr.Zero)
                     {
-                        await Task.Delay(5_000);
+                        await Task.Delay(browserHost != null ? 100 : 5_000);
                         if (existingTextControlWindow != IntPtr.Zero &&
                             !await TryFocusAndSelectExternalTextAsync(
                                 existingTextAppWindow,
@@ -1004,15 +1085,18 @@ internal static class Program
         private readonly Process _process;
         private readonly string _profileDirectory;
         private readonly string _ownedProfilePrefix;
+        private readonly string _titlePrefix;
 
         private BrowserCompatibilityHost(
             Process process,
             string profileDirectory,
-            string ownedProfilePrefix)
+            string ownedProfilePrefix,
+            string titlePrefix)
         {
             _process = process;
             _profileDirectory = profileDirectory;
             _ownedProfilePrefix = ownedProfilePrefix;
+            _titlePrefix = titlePrefix;
         }
 
         public IntPtr MainWindowHandle
@@ -1024,7 +1108,10 @@ internal static class Program
             }
         }
 
-        public static BrowserCompatibilityHost Start(string browserKind, string targetKind)
+        public static BrowserCompatibilityHost Start(
+            string browserKind,
+            string targetKind,
+            bool selectText)
         {
             var browser = browserKind switch
             {
@@ -1083,8 +1170,11 @@ internal static class Program
             Process? process = null;
             try
             {
+                var titlePrefix = $"LayoutFix {browser.DisplayName} E2E {targetKind}";
                 var fixturePath = Path.Combine(profileDirectory, "text-compatibility.html");
-                File.WriteAllText(fixturePath, CreateFixture(browser.DisplayName, targetKind));
+                File.WriteAllText(
+                    fixturePath,
+                    CreateFixture(browser.DisplayName, targetKind, selectText));
 
                 var startInfo = new ProcessStartInfo(browserPath)
                 {
@@ -1115,7 +1205,7 @@ internal static class Program
                     process.Refresh();
                     if (process.MainWindowHandle != IntPtr.Zero &&
                         process.MainWindowTitle.Contains(
-                            $"LayoutFix {browser.DisplayName} E2E {targetKind}",
+                            titlePrefix,
                             StringComparison.Ordinal))
                     {
                         // MainWindowTitle is populated from the local document only
@@ -1125,7 +1215,8 @@ internal static class Program
                         return new BrowserCompatibilityHost(
                             process,
                             profileDirectory,
-                            ownedProfilePrefix);
+                            ownedProfilePrefix,
+                            titlePrefix);
                     }
                     Thread.Sleep(100);
                 }
@@ -1173,7 +1264,32 @@ internal static class Program
             }
         }
 
-        private static string CreateFixture(string browserName, string targetKind)
+        public bool TryReadTargetText(out string text)
+        {
+            text = string.Empty;
+            try
+            {
+                _process.Refresh();
+                const string marker = "|value=";
+                var title = _process.MainWindowTitle;
+                var markerIndex = title.IndexOf(marker, StringComparison.Ordinal);
+                if (!title.StartsWith(_titlePrefix, StringComparison.Ordinal) || markerIndex < 0)
+                    return false;
+
+                text = Uri.UnescapeDataString(title[(markerIndex + marker.Length)..]);
+                return true;
+            }
+            catch
+            {
+                text = string.Empty;
+                return false;
+            }
+        }
+
+        private static string CreateFixture(
+            string browserName,
+            string targetKind,
+            bool selectText)
         {
             var target = targetKind switch
             {
@@ -1183,8 +1299,12 @@ internal static class Program
                 _ => throw new ArgumentOutOfRangeException(nameof(targetKind))
             };
             var selectScript = targetKind == "contenteditable"
-                ? "const r=document.createRange();r.selectNodeContents(t);const s=getSelection();s.removeAllRanges();s.addRange(r);"
-                : "t.select();";
+                ? selectText
+                    ? "const r=document.createRange();r.selectNodeContents(t);const s=getSelection();s.removeAllRanges();s.addRange(r);"
+                    : "const r=document.createRange();r.selectNodeContents(t);r.collapse(false);const s=getSelection();s.removeAllRanges();s.addRange(r);"
+                : selectText
+                    ? "t.select();"
+                    : "t.setSelectionRange(t.value.length,t.value.length);";
             return $$"""
                 <!doctype html>
                 <html lang="en">
@@ -1199,8 +1319,12 @@ internal static class Program
                   <script>
                     addEventListener('load',()=>{
                       const t=document.getElementById('target');
+                      const value=()=>t.isContentEditable?t.textContent:t.value;
+                      const report=()=>document.title='LayoutFix {{browserName}} E2E {{targetKind}}|value='+encodeURIComponent(value());
                       const activate=()=>{t.focus();{{selectScript}}};
+                      t.addEventListener('input',report);
                       activate();
+                      report();
                       addEventListener('focus',()=>setTimeout(activate,0));
                       setTimeout(activate,250);
                       setTimeout(activate,1000);
@@ -2095,18 +2219,32 @@ internal static class Program
         var foregroundThread = foregroundWindow == IntPtr.Zero
             ? 0
             : Win32.GetWindowThreadProcessId(foregroundWindow, out _);
-        var attached = foregroundThread != 0 && foregroundThread != currentThread &&
+        var targetThread = Win32.GetWindowThreadProcessId(targetWindow, out _);
+        var attachedForeground = foregroundThread != 0 && foregroundThread != currentThread &&
             NativeFocus.AttachThreadInput(currentThread, foregroundThread, attach: true);
+        var attachedTarget = targetThread != 0 && targetThread != currentThread &&
+            targetThread != foregroundThread &&
+            NativeFocus.AttachThreadInput(currentThread, targetThread, attach: true);
 
         try
         {
-            NativeFocus.BringWindowToTop(targetWindow);
-            NativeFocus.SetForegroundWindow(targetWindow);
-            return Win32.GetForegroundWindow() == targetWindow;
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+            do
+            {
+                NativeFocus.BringWindowToTop(targetWindow);
+                NativeFocus.SetForegroundWindow(targetWindow);
+                if (Win32.GetForegroundWindow() == targetWindow)
+                    return true;
+                Thread.Sleep(50);
+            }
+            while (DateTime.UtcNow < deadline);
+            return false;
         }
         finally
         {
-            if (attached)
+            if (attachedTarget)
+                NativeFocus.AttachThreadInput(currentThread, targetThread, attach: false);
+            if (attachedForeground)
                 NativeFocus.AttachThreadInput(currentThread, foregroundThread, attach: false);
         }
     }
@@ -6500,6 +6638,26 @@ internal static class Program
                 Marshal.GetLastWin32Error(),
                 $"Physical hotkey E2E SendInput accepted {sent} of {batch.Length} events.");
         }
+    }
+
+    private static ushort[] SendExternalHotkeyKeepingModifiersPressed(
+        string configuredHotkey,
+        ushort virtualKey)
+    {
+        var combo = HotkeyCombo.Parse(configuredHotkey);
+        if (combo.Win)
+            throw new InvalidOperationException("Windows-key E2E hotkeys are not supported.");
+
+        var pressedModifiers = new List<ushort>();
+        if (combo.Ctrl) pressedModifiers.Add(0x11);
+        if (combo.Alt) pressedModifiers.Add(0x12);
+        if (combo.Shift) pressedModifiers.Add(0x10);
+
+        foreach (var modifier in pressedModifiers)
+            SendExternalKeyDown(modifier);
+        SendExternalKeyDown(virtualKey);
+        SendExternalKeyUp(virtualKey);
+        return pressedModifiers.ToArray();
     }
 
     private static void SendExternalHotkeyWithSuppressedRepeats(

@@ -5,6 +5,8 @@ using LayoutFix.Infrastructure.Services;
 using LayoutFix.UI;
 using Microsoft.Win32;
 using System.Diagnostics;
+using System.Reflection;
+using System.Runtime.InteropServices;
 
 namespace LayoutFix;
 
@@ -104,26 +106,20 @@ internal static class Program
             _ = services.GetRequiredService<AutoConversionService>();
             var dictionaryAnalyzer = services.GetRequiredService<DictionaryAnalyzer>();
             var logger = services.GetRequiredService<ILoggerService>();
-            _ = Task.Run(() =>
+            LogApplicationIdentity(logger);
+            try
             {
-                try
-                {
-                    dictionaryAnalyzer.WarmUp();
-                }
-                catch (Exception ex)
-                {
-                    try
-                    {
-                        logger.LogError(
-                            "Dictionary warm-up failed; on-demand loading remains available.",
-                            ex);
-                    }
-                    catch
-                    {
-                        // Shutdown may dispose logging while the background warm-up is unwinding.
-                    }
-                }
-            });
+                // The first manual correction must not synchronously load several
+                // dictionaries while the user is waiting on a global hotkey. Pay
+                // this bounded cost during startup, before hooks become operational.
+                dictionaryAnalyzer.WarmUp();
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(
+                    "Dictionary warm-up failed; on-demand loading remains available.",
+                    ex);
+            }
 
             hookRecoveryTimer = new System.Windows.Forms.Timer { Interval = 5_000 };
             hookRecoveryTimer.Tick += (_, _) => hookRecovery.RecoverIfRequested();
@@ -168,6 +164,23 @@ internal static class Program
         }
 
         return 0;
+    }
+
+    private static void LogApplicationIdentity(ILoggerService logger)
+    {
+        var assembly = typeof(Program).Assembly;
+        var assemblyName = assembly.GetName();
+        var informationalVersion = assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion ?? "unknown";
+        var executableName = Path.GetFileName(Environment.ProcessPath) ?? "unknown";
+        logger.LogInfo(
+            "Application identity: " +
+            $"Version={assemblyName.Version}; " +
+            $"InformationalVersion={informationalVersion}; " +
+            $"ExecutableName={executableName}; " +
+            $"ProcessArchitecture={RuntimeInformation.ProcessArchitecture}; " +
+            $"Runtime={Environment.Version}.");
     }
 
     private static int RunSmokeTest()

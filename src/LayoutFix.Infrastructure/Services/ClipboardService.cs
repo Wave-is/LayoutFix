@@ -433,7 +433,7 @@ public sealed class ClipboardService : IClipboardService
             // asynchronously to an ownership change. Require the native payload to
             // remain readable across a short stability window before reporting that
             // the user's text has been restored.
-            Thread.Sleep(100);
+            Thread.Sleep(25);
             if (!string.Equals(ReadUnicodeTextNative(), text, StringComparison.Ordinal))
             {
                 throw new ExternalException(

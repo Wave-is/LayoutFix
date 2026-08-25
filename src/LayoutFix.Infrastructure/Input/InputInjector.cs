@@ -12,18 +12,23 @@ namespace LayoutFix.Infrastructure.Input;
 public class InputInjector : IInputInjector
 {
     private readonly Func<Win32.INPUT[], uint> _inputSender;
+    private readonly Func<int, bool> _isKeyPressed;
 
     public InputInjector()
         : this(inputs => Win32.SendInput(
             (uint)inputs.Length,
             inputs,
-            Marshal.SizeOf<Win32.INPUT>()))
+            Marshal.SizeOf<Win32.INPUT>()),
+            virtualKey => (Win32.GetAsyncKeyState(virtualKey) & 0x8000) != 0)
     {
     }
 
-    internal InputInjector(Func<Win32.INPUT[], uint> inputSender)
+    internal InputInjector(
+        Func<Win32.INPUT[], uint> inputSender,
+        Func<int, bool>? isKeyPressed = null)
     {
         _inputSender = inputSender ?? throw new ArgumentNullException(nameof(inputSender));
+        _isKeyPressed = isKeyPressed ?? (_ => false);
     }
 
     public async Task SendKeyCombinationAsync(bool ctrl, bool alt, bool shift, string key)
@@ -31,49 +36,43 @@ public class InputInjector : IInputInjector
         ushort vk = MapStringToVirtualKey(key);
         if (vk == 0) return;
 
-        int numInputs = 0;
-        if (ctrl) numInputs += 2;
-        if (alt) numInputs += 2;
-        if (shift) numInputs += 2;
-        numInputs += 2;
-
-        var inputs = new Win32.INPUT[numInputs];
-        int idx = 0;
-
-        if (ctrl) inputs[idx++] = CreateKeyboardInput((ushort)Win32.VK_CONTROL, false);
-        if (alt) inputs[idx++] = CreateKeyboardInput((ushort)Win32.VK_MENU, false);
-        if (shift) inputs[idx++] = CreateKeyboardInput((ushort)Win32.VK_SHIFT, false);
-
-        var targetKeyDownIndex = idx;
-        inputs[idx++] = CreateKeyboardInput(vk, false);
-        inputs[idx++] = CreateKeyboardInput(vk, true);
-
-        if (shift) inputs[idx++] = CreateKeyboardInput((ushort)Win32.VK_SHIFT, true);
-        if (alt) inputs[idx++] = CreateKeyboardInput((ushort)Win32.VK_MENU, true);
-        if (ctrl) inputs[idx++] = CreateKeyboardInput((ushort)Win32.VK_CONTROL, true);
+        var batch = CreateModifierSafeBatch(
+            [CreateKeyboardInput(vk, false), CreateKeyboardInput(vk, true)],
+            ctrl,
+            alt,
+            shift);
+        var targetKeyDownIndex = batch.PayloadStartIndex;
 
         SendInputs(
-            inputs,
+            batch.Inputs,
             InputInjectionOperation.KeyCombination,
             requestedUnitCount: 1,
-            affectedUnitCount: sent => sent > targetKeyDownIndex ? 1 : 0);
-        await Task.Delay(50);
+            affectedUnitCount: sent => sent > targetKeyDownIndex ? 1 : 0,
+            batch.PhysicalModifiersToRestore);
+        // Callers either wait for an observable clipboard sequence change or
+        // verify the resulting text. A fixed 50 ms pause on every Ctrl+C and
+        // Ctrl+V made the two-phase manual transaction pay this cost repeatedly.
+        await Task.Delay(15);
     }
 
     public async Task SendBackspacesAsync(int count)
     {
         if (count <= 0) return;
-        var inputs = new Win32.INPUT[count * 2];
+        var payload = new Win32.INPUT[count * 2];
         for (int i = 0; i < count; i++)
         {
-            inputs[i * 2] = CreateKeyboardInput(0x08, false);
-            inputs[i * 2 + 1] = CreateKeyboardInput(0x08, true);
+            payload[i * 2] = CreateKeyboardInput(0x08, false);
+            payload[i * 2 + 1] = CreateKeyboardInput(0x08, true);
         }
+        var batch = CreateModifierSafeBatch(payload);
         SendInputs(
-            inputs,
+            batch.Inputs,
             InputInjectionOperation.Backspace,
             requestedUnitCount: count,
-            affectedUnitCount: sent => Math.Min(count, (sent + 1) / 2));
+            affectedUnitCount: sent => Math.Min(
+                count,
+                (Math.Max(0, sent - batch.PayloadStartIndex) + 1) / 2),
+            batch.PhysicalModifiersToRestore);
         await Task.Delay(20);
     }
 
@@ -105,7 +104,7 @@ public class InputInjector : IInputInjector
         if (string.IsNullOrEmpty(text)) return;
 
         var textUnits = CreateTextInjectionUnits(text);
-        var inputs = new Win32.INPUT[textUnits.Count * 2];
+        var payload = new Win32.INPUT[textUnits.Count * 2];
         var inputIndex = 0;
         foreach (var unit in textUnits)
         {
@@ -117,7 +116,7 @@ public class InputInjector : IInputInjector
                 dwFlags = Win32.KEYEVENTF_UNICODE,
                 dwExtraInfo = KeyboardHook.InjectedExtraInfo
             };
-            inputs[inputIndex++] = down;
+            payload[inputIndex++] = down;
 
             var up = new Win32.INPUT { type = Win32.INPUT_KEYBOARD };
             up.u.ki = new Win32.KEYBDINPUT
@@ -127,16 +126,20 @@ public class InputInjector : IInputInjector
                 dwFlags = Win32.KEYEVENTF_UNICODE | Win32.KEYEVENTF_KEYUP,
                 dwExtraInfo = KeyboardHook.InjectedExtraInfo
             };
-            inputs[inputIndex++] = up;
+            payload[inputIndex++] = up;
         }
 
+        var batch = CreateModifierSafeBatch(payload);
         SendInputs(
-            inputs,
+            batch.Inputs,
             InputInjectionOperation.Text,
             requestedUnitCount: text.Length,
             affectedUnitCount: sent => textUnits
-                .Take(Math.Min(textUnits.Count, (sent + 1) / 2))
-                .Sum(unit => unit.SourceUtf16Length));
+                .Take(Math.Min(
+                    textUnits.Count,
+                    (Math.Max(0, sent - batch.PayloadStartIndex) + 1) / 2))
+                .Sum(unit => unit.SourceUtf16Length),
+            batch.PhysicalModifiersToRestore);
         await Task.Delay(50);
     }
 
@@ -182,17 +185,74 @@ public class InputInjector : IInputInjector
         return input;
     }
 
+    private ModifierSafeInputBatch CreateModifierSafeBatch(
+        IReadOnlyCollection<Win32.INPUT> payload,
+        bool ctrl = false,
+        bool alt = false,
+        bool shift = false)
+    {
+        var modifiers = new[]
+        {
+            new ModifierState((ushort)Win32.VK_CONTROL, ctrl),
+            new ModifierState((ushort)Win32.VK_MENU, alt),
+            new ModifierState((ushort)Win32.VK_SHIFT, shift),
+            new ModifierState((ushort)Win32.VK_LWIN, Desired: false),
+            new ModifierState((ushort)Win32.VK_RWIN, Desired: false)
+        };
+        var pressed = modifiers
+            .Select(modifier => modifier with { Pressed = _isKeyPressed(modifier.VirtualKey) })
+            .ToArray();
+        var physicalModifiersToRestore = pressed
+            .Where(modifier => modifier.Pressed && !modifier.Desired)
+            .Select(modifier => modifier.VirtualKey)
+            .ToArray();
+        var syntheticModifiers = pressed
+            .Where(modifier => modifier.Desired && !modifier.Pressed)
+            .Select(modifier => modifier.VirtualKey)
+            .ToArray();
+
+        var inputs = new List<Win32.INPUT>(
+            physicalModifiersToRestore.Length * 2 +
+            syntheticModifiers.Length * 2 +
+            payload.Count);
+
+        // A hotkey modifier may still be physically down when the low-level hook
+        // dispatches the action. Without this wrapper Ctrl+C becomes Ctrl+Shift+C
+        // for Shift+Scroll and the capture either stalls or returns no text.
+        // Neutralize only unwanted modifiers, execute one atomic SendInput batch,
+        // then restore the physical state until the user releases the key.
+        inputs.AddRange(physicalModifiersToRestore.Select(
+            modifier => CreateKeyboardInput(modifier, isKeyUp: true)));
+        inputs.AddRange(syntheticModifiers.Select(
+            modifier => CreateKeyboardInput(modifier, isKeyUp: false)));
+        var payloadStartIndex = inputs.Count;
+        inputs.AddRange(payload);
+        inputs.AddRange(syntheticModifiers
+            .Reverse()
+            .Select(modifier => CreateKeyboardInput(modifier, isKeyUp: true)));
+        inputs.AddRange(physicalModifiersToRestore
+            .Reverse()
+            .Select(modifier => CreateKeyboardInput(modifier, isKeyUp: false)));
+
+        return new ModifierSafeInputBatch(
+            inputs.ToArray(),
+            payloadStartIndex,
+            physicalModifiersToRestore);
+    }
+
     private void SendInputs(
         Win32.INPUT[] inputs,
         InputInjectionOperation operation,
         int requestedUnitCount,
-        Func<int, int> affectedUnitCount)
+        Func<int, int> affectedUnitCount,
+        IReadOnlyCollection<ushort>? physicalModifiersToRestore = null)
     {
         var sent = (int)_inputSender(inputs);
         if (sent != inputs.Length)
         {
             var error = Marshal.GetLastWin32Error();
             ReleaseAcceptedKeyDowns(inputs, sent);
+            RestoreStillPressedModifiers(physicalModifiersToRestore);
             throw new InputInjectionException(
                 operation,
                 requestedUnitCount,
@@ -202,6 +262,29 @@ public class InputInjector : IInputInjector
                 new Win32Exception(
                     error,
                     "SendInput was blocked or only partially accepted. The target may be elevated or unavailable."));
+        }
+    }
+
+    private void RestoreStillPressedModifiers(
+        IReadOnlyCollection<ushort>? physicalModifiersToRestore)
+    {
+        if (physicalModifiersToRestore == null || physicalModifiersToRestore.Count == 0)
+            return;
+
+        var restores = physicalModifiersToRestore
+            .Where(modifier => _isKeyPressed(modifier))
+            .Select(modifier => CreateKeyboardInput(modifier, isKeyUp: false))
+            .ToArray();
+        if (restores.Length == 0)
+            return;
+
+        try
+        {
+            _inputSender(restores);
+        }
+        catch
+        {
+            // Preserve the progress-aware failure from the original operation.
         }
     }
 
@@ -295,6 +378,16 @@ public class InputInjector : IInputInjector
             _ => 0
         };
     }
+
+    private readonly record struct ModifierState(
+        ushort VirtualKey,
+        bool Desired,
+        bool Pressed = false);
+
+    private readonly record struct ModifierSafeInputBatch(
+        Win32.INPUT[] Inputs,
+        int PayloadStartIndex,
+        ushort[] PhysicalModifiersToRestore);
 
     private readonly record struct TextInjectionUnit(char Value, int SourceUtf16Length);
 }

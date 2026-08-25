@@ -57,18 +57,36 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
             return false;
         }
 
-        if (string.Equals(
-                adapterId,
-                PhotoshopSaveDialogAdapterId,
-                StringComparison.Ordinal))
+        // Every supported Adobe profile resolves to a real, focused Win32 Edit
+        // HWND. Prefer its bounded native selection contract over UI Automation:
+        // Premiere 26.x exposes ordinary Edit fields whose accessibility parent
+        // is not the historical OS_EditTextContainer used by inline rename.
+        // Requiring that parent made the adapter claim the field and then reject
+        // every manual correction before the generic path could run.
+        var nativeEditAvailable = await RunBoundedAsync(
+            () => TryGetNativeEditSelection(
+                context,
+                out _,
+                out _),
+            timeoutResult: false,
+            cancellationToken);
+        if (nativeEditAvailable)
         {
             return await RunBoundedAsync(
-                () => ReplacePhotoshopSaveDialogSelection(
+                () => ReplaceNativeEditSelection(
                     context,
                     expectedText,
                     replacement),
                 timeoutResult: false,
                 cancellationToken);
+        }
+
+        if (string.Equals(
+                adapterId,
+                PhotoshopSaveDialogAdapterId,
+                StringComparison.Ordinal))
+        {
+            return false;
         }
 
         if (!await RunBoundedAsync(
@@ -92,18 +110,22 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
         ActiveWindowContext context,
         string adapterId)
     {
+        if (TryGetNativeEditSelection(
+                context,
+                out _,
+                out var nativeSelectedText))
+        {
+            return nativeSelectedText.Length > 0
+                ? DirectTextCaptureResult.Captured(adapterId, nativeSelectedText)
+                : DirectTextCaptureResult.Rejected(adapterId);
+        }
+
         if (string.Equals(
                 adapterId,
                 PhotoshopSaveDialogAdapterId,
                 StringComparison.Ordinal))
         {
-            return TryGetPhotoshopSaveDialogSelection(
-                    context,
-                    out _,
-                    out var nativeSelectedText) &&
-                nativeSelectedText.Length > 0
-                ? DirectTextCaptureResult.Captured(adapterId, nativeSelectedText)
-                : DirectTextCaptureResult.Rejected(adapterId);
+            return DirectTextCaptureResult.Rejected(adapterId);
         }
 
         var element = AutomationElement.FocusedElement;
@@ -149,12 +171,12 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
         return true;
     }
 
-    private bool ReplacePhotoshopSaveDialogSelection(
+    private bool ReplaceNativeEditSelection(
         ActiveWindowContext context,
         string expectedText,
         string replacement)
     {
-        if (!TryGetPhotoshopSaveDialogSelection(
+        if (!TryGetNativeEditSelection(
                 context,
                 out var currentValue,
                 out var selectedText) ||
@@ -349,7 +371,7 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
         return true;
     }
 
-    private bool TryGetPhotoshopSaveDialogSelection(
+    private bool TryGetNativeEditSelection(
         ActiveWindowContext context,
         out string currentValue,
         out string selectedText)
