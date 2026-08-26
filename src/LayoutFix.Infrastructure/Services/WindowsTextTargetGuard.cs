@@ -326,8 +326,22 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
         var releaseGate = true;
         try
         {
+            try
+            {
+                if (_integrityProbe(context.ProcessId) != TargetInputAccess.Allowed)
+                    return TextSelectionReadResult.Unsupported;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError("Target process integrity probe failed during selection read", exception);
+                return TextSelectionReadResult.Unsupported;
+            }
+
             var probeTask = Task.Run(
-                () => ProbeAutomationSelectedText(context),
+                () => ProbeAutomationSelectedText(
+                    context,
+                    _logger,
+                    () => _settingsService?.Current.LoggingEnabled == true),
                 CancellationToken.None);
             var completed = await Task.WhenAny(
                 probeTask,
@@ -360,7 +374,8 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
             LogSupportDiagnostic(
                 "observed",
                 "selection-text",
-                $"Probe=uia; Supported={result.IsSupported}; Length={result.Text?.Length ?? 0}");
+                $"Probe=uia; Supported={result.IsSupported}; Safe={result.IsSafeToModify}; " +
+                $"Length={result.Text?.Length ?? 0}");
             return result;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -614,19 +629,60 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
     }
 
     private static TextSelectionReadResult ProbeAutomationSelectedText(
-        ActiveWindowContext context)
+        ActiveWindowContext context,
+        ILoggerService? logger = null,
+        Func<bool>? diagnosticsEnabled = null)
     {
         var element = AutomationElement.FocusedElement;
-        if (element == null || element.Current.ProcessId != context.ProcessId ||
-            !element.TryGetCurrentPattern(TextPattern.Pattern, out var patternObject) ||
-            patternObject is not TextPattern textPattern)
+        if (element == null)
         {
+            LogAutomationDiagnostic(logger, diagnosticsEnabled, "FocusedElement=unavailable");
             return TextSelectionReadResult.Unsupported;
         }
 
+        var current = element.Current;
+        if (current.ProcessId != context.ProcessId)
+        {
+            LogAutomationDiagnostic(logger, diagnosticsEnabled, "ProcessMatch=False");
+            return TextSelectionReadResult.Unsupported;
+        }
+
+        var hasWritableValuePattern = false;
+        if (element.TryGetCurrentPattern(
+                ValuePattern.Pattern,
+                out var valuePatternObject) &&
+            valuePatternObject is ValuePattern valuePattern)
+        {
+            hasWritableValuePattern = !valuePattern.Current.IsReadOnly;
+        }
+
+        var isEditOrDocument = current.ControlType is not null &&
+            (current.ControlType == ControlType.Edit ||
+             current.ControlType == ControlType.Document);
+        var hasTextPattern = element.TryGetCurrentPattern(
+            TextPattern.Pattern,
+            out var patternObject);
+        var editable = IsEditableAutomationTarget(
+            current.IsEnabled,
+            current.IsKeyboardFocusable,
+            current.IsPassword,
+            hasWritableValuePattern,
+            isEditOrDocument,
+            hasTextPattern);
+        LogAutomationDiagnostic(
+            logger,
+            diagnosticsEnabled,
+            $"ProcessMatch=True; ControlType={DiagnosticValue(current.ControlType?.ProgrammaticName)}; " +
+            $"Class={DiagnosticValue(current.ClassName)}; Enabled={current.IsEnabled}; " +
+            $"KeyboardFocusable={current.IsKeyboardFocusable}; Password={current.IsPassword}; " +
+            $"WritableValuePattern={hasWritableValuePattern}; EditOrDocument={isEditOrDocument}; " +
+            $"TextPattern={hasTextPattern}; Editable={editable}; CombinedSelectionProbe=True");
+        if (!editable || patternObject is not TextPattern textPattern)
+            return TextSelectionReadResult.Unsupported;
+
         var selections = textPattern.GetSelection();
         return selections.Length == 1
-            ? TextSelectionReadResult.Captured(selections[0].GetText(-1))
+            ? TextSelectionReadResult.Verified(selections[0].GetText(-1))
             : TextSelectionReadResult.Unsupported;
     }
 

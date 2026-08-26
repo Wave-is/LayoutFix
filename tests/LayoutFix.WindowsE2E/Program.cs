@@ -18,6 +18,7 @@ using Microsoft.Win32;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Windows.Automation;
 
 namespace LayoutFix.WindowsE2E;
@@ -25,6 +26,8 @@ namespace LayoutFix.WindowsE2E;
 internal static class Program
 {
     private const string ClipboardSentinel = "LAYOUTFIX_CLIPBOARD_SENTINEL";
+    private const int BrowserCorrectionLatencyLimitMilliseconds = 750;
+    private const int BrowserActionLatencyLimitMilliseconds = 400;
     private static readonly ManualCorrectionCase[] ManualCorrectionCases =
     [
         new("lowercase", "ghbdtn", "привет"),
@@ -353,7 +356,7 @@ internal static class Program
         settings.Save(settings.Current);
 
         var logPath = Path.Combine(testDirectory, "e2e.log");
-        var logger = new FileLoggerService(settings, logPath);
+        using var logger = new FileLoggerService(settings, logPath);
         using var keyboardHook = new KeyboardHook(logger);
         using var mouseHook = new MouseHook(logger);
         using var clipboard = new ClipboardService(logger);
@@ -692,10 +695,13 @@ internal static class Program
                                 $"elapsedMs={actionStopwatch.Elapsed.TotalMilliseconds:0};" +
                                 $"caretFallback={browserCaretFallbackTest};" +
                                 $"modifiersHeld={holdHotkeyModifiersDuringAction}");
-                            if (!firstPressSucceeded || actionStopwatch.Elapsed > TimeSpan.FromSeconds(1))
+                            if (!firstPressSucceeded ||
+                                actionStopwatch.Elapsed > TimeSpan.FromMilliseconds(
+                                    BrowserCorrectionLatencyLimitMilliseconds))
                             {
                                 throw new InvalidOperationException(
-                                    "The browser target did not complete one-press correction within 1000 ms.");
+                                    $"The browser target did not complete one-press correction within " +
+                                    $"{BrowserCorrectionLatencyLimitMilliseconds} ms.");
                             }
                             if (holdHotkeyModifiersDuringAction)
                             {
@@ -937,6 +943,7 @@ internal static class Program
         mouseHook.Stop();
         keyboardHook.Stop();
 
+        logger.Flush();
         if (File.Exists(logPath))
         {
             var logText = File.ReadAllText(logPath);
@@ -970,6 +977,23 @@ internal static class Program
                      !targetProcessDiagnostic || !privateContentAbsent))
                 {
                     _exitCode = 87;
+                }
+
+                if (browserHost != null)
+                {
+                    var timingMatch = Regex.Match(
+                        logText,
+                        @"Phase=action-timing; Action=[^;]+; ElapsedMs=(?<elapsed>\d+)");
+                    var actionLatency = timingMatch.Success
+                        ? int.Parse(timingMatch.Groups["elapsed"].Value, CultureInfo.InvariantCulture)
+                        : int.MaxValue;
+                    var actionLatencyPassed =
+                        actionLatency <= BrowserActionLatencyLimitMilliseconds;
+                    AppendResult(
+                        $"browser-action-latency:success={actionLatencyPassed};" +
+                        $"elapsedMs={actionLatency};limitMs={BrowserActionLatencyLimitMilliseconds}");
+                    if (_exitCode == 0 && !actionLatencyPassed)
+                        _exitCode = 89;
                 }
             }
 
@@ -1981,7 +2005,7 @@ internal static class Program
         settings.Current.LoggingEnabled = true;
         settings.Save(settings.Current);
         var logPath = Path.Combine(testDirectory, "clipboard-e2e.log");
-        var logger = new FileLoggerService(settings, logPath);
+        using var logger = new FileLoggerService(settings, logPath);
         using var clipboard = new ClipboardService(logger);
         IClipboardSnapshot? original = null;
         var result = 1;
@@ -2072,6 +2096,7 @@ internal static class Program
             var complexPreserved = complexTextPreserved &&
                 complexImagePreserved &&
                 complexPrivatePreserved;
+            logger.Flush();
             var privateFormatNameRedacted = File.Exists(logPath) &&
                 !File.ReadAllText(logPath).Contains(privateFormatName, StringComparison.Ordinal);
             AppendResult(
@@ -2144,6 +2169,7 @@ internal static class Program
                 original.Dispose();
             }
 
+            logger.Flush();
             if (File.Exists(logPath))
             {
                 foreach (var line in File.ReadLines(logPath))
@@ -2390,8 +2416,9 @@ internal static class Program
             var settings = new SettingsService(settingsPath);
             settings.Current.LoggingEnabled = true;
             settings.Save(settings.Current);
-            var logger = new FileLoggerService(settings, logPath);
+            using var logger = new FileLoggerService(settings, logPath);
             logger.LogInfo("diagnostic bootstrap");
+            logger.Flush();
             using (var stream = new FileStream(
                        logPath,
                        FileMode.Open,
@@ -2424,6 +2451,7 @@ internal static class Program
                     logger.LogError(exception.SafeLogMessage, exception);
                 }
             }
+            logger.Flush();
 
             if (persistenceException is not
                 {

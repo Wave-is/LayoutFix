@@ -29,6 +29,7 @@ public class HotkeyCoordinator : IHotkeyCoordinator
     private const int QueueCapacity = 64;
     private static readonly TimeSpan DefaultActionTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan BusyNotificationThrottle = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan CompletedDuplicateGrace = TimeSpan.FromMilliseconds(75);
     private readonly Channel<ActionRequest> _executionQueue;
     private readonly Task _queueProcessor;
     private readonly TimeSpan _actionTimeout;
@@ -40,6 +41,8 @@ public class HotkeyCoordinator : IHotkeyCoordinator
     // Keeping the action in the atomic state lets us collapse a quick duplicate
     // press without showing an error while still rejecting a conflicting action.
     private int _pendingHotkeyAction;
+    private int _lastCompletedHotkeyAction;
+    private long _lastCompletedHotkeyTimestamp;
     private long _lastBusyNotificationTimestamp;
     private bool _disposed;
     private readonly IKeyboardHook _keyboardHook;
@@ -222,6 +225,15 @@ public class HotkeyCoordinator : IHotkeyCoordinator
                 return;
             }
 
+            if (IsRecentlyCompletedDuplicate(requestedState))
+            {
+                Interlocked.CompareExchange(ref _pendingHotkeyAction, 0, requestedState);
+                _logger.LogInfo(
+                    $"Action: {binding.Action}; Outcome: duplicate hotkey coalesced " +
+                    "because the same action recently completed.");
+                return;
+            }
+
             if (!_executionQueue.Writer.TryWrite(new ActionRequest(
                     binding.Action,
                     Completion: null,
@@ -235,6 +247,16 @@ public class HotkeyCoordinator : IHotkeyCoordinator
         {
             _logger.LogError("Error in OnHotkeyPressed", ex);
         }
+    }
+
+    private bool IsRecentlyCompletedDuplicate(int requestedState)
+    {
+        if (Volatile.Read(ref _lastCompletedHotkeyAction) != requestedState)
+            return false;
+
+        var completedAt = Volatile.Read(ref _lastCompletedHotkeyTimestamp);
+        return completedAt != 0 &&
+            Stopwatch.GetElapsedTime(completedAt) < CompletedDuplicateGrace;
     }
 
     private void ReportBusyHotkey(HotkeyAction action)
@@ -367,8 +389,19 @@ public class HotkeyCoordinator : IHotkeyCoordinator
             }
             finally
             {
+                _logger.LogInfo(
+                    $"SupportDiagnostic: Phase=action-timing; Action={request.Action}; " +
+                    $"ElapsedMs={Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds:0}.");
                 if (request.IsHotkey)
+                {
+                    Volatile.Write(
+                        ref _lastCompletedHotkeyAction,
+                        (int)request.Action + 1);
+                    Volatile.Write(
+                        ref _lastCompletedHotkeyTimestamp,
+                        Stopwatch.GetTimestamp());
                     Volatile.Write(ref _pendingHotkeyAction, 0);
+                }
             }
         }
     }

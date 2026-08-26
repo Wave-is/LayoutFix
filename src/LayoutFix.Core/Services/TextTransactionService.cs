@@ -64,13 +64,6 @@ public sealed class TextTransactionService : ITextTransactionService
         }
         LogCaptureTarget(captureId, window, allowPreviousWordFallback);
         var captureInputGeneration = CaptureInputGeneration();
-        if (_targetGuard != null &&
-            !await _targetGuard.CanModifyAsync(window, cancellationToken))
-        {
-            _logger.LogWarning("Text capture rejected because the focused control is secure or cannot be verified.");
-            LogSupportDiagnostic(captureId, "capture", "rejected", "target-safety-check-failed");
-            return null;
-        }
 
         var fallbackSelectionMade = false;
         try
@@ -128,6 +121,12 @@ public sealed class TextTransactionService : ITextTransactionService
                         LogSupportDiagnostic(captureId, "capture", "rejected", "direct-adapter-selection-unverified");
                         return null;
                     }
+                    LogSupportDiagnostic(
+                        captureId,
+                        "target-probe",
+                        "accepted",
+                        "direct-adapter-safety",
+                        $"Adapter={DiagnosticValue(directCapture.AdapterId)}");
                     if (InputChanged(captureInputGeneration))
                     {
                         LogInputChanged(
@@ -163,6 +162,28 @@ public sealed class TextTransactionService : ITextTransactionService
             var selectionRead = _targetGuard != null
                 ? await _targetGuard.TryReadSelectedTextAsync(window, cancellationToken)
                 : TextSelectionReadResult.Unsupported;
+            if (!selectionRead.IsSafeToModify &&
+                _targetGuard != null &&
+                !await _targetGuard.CanModifyAsync(window, cancellationToken))
+            {
+                _logger.LogWarning("Text capture rejected because the focused control is secure or cannot be verified.");
+                LogSupportDiagnostic(captureId, "capture", "rejected", "target-safety-check-failed");
+                return null;
+            }
+            if (InputChanged(captureInputGeneration))
+            {
+                LogInputChanged(
+                    captureId,
+                    "capture",
+                    "input-changed-after-target-validation",
+                    captureInputGeneration);
+                return null;
+            }
+            if (!_activeWindow.IsSameActiveWindow(window))
+            {
+                LogSupportDiagnostic(captureId, "capture", "rejected", "focus-changed-after-target-validation");
+                return null;
+            }
             var selectionAvailability = selectionRead.IsSupported
                 ? string.IsNullOrEmpty(selectionRead.Text)
                     ? TextSelectionAvailability.None
@@ -341,27 +362,6 @@ public sealed class TextTransactionService : ITextTransactionService
             LogSupportDiagnostic(captureId, "replacement", "rejected", "focus-changed-before-replacement");
             return false;
         }
-        if (_targetGuard != null &&
-            !await _targetGuard.CanModifyAsync(selection.Window, cancellationToken))
-        {
-            LogSupportDiagnostic(captureId, "replacement", "rejected", "target-safety-recheck-failed");
-            return false;
-        }
-        if (InputChanged(selectionInputGeneration))
-        {
-            LogInputChanged(
-                captureId,
-                "replacement",
-                "input-changed-after-safety-recheck",
-                selectionInputGeneration);
-            return false;
-        }
-        if (!_activeWindow.IsSameActiveWindow(selection.Window))
-        {
-            LogSupportDiagnostic(captureId, "replacement", "rejected", "focus-changed-after-safety-recheck");
-            return false;
-        }
-
         if (selection.DirectAdapterId != null)
         {
             if (_directTextAdapter == null)
@@ -408,6 +408,27 @@ public sealed class TextTransactionService : ITextTransactionService
                     selection.Window,
                     cancellationToken)
                 : TextSelectionReadResult.Unsupported;
+            if (!selectionRead.IsSafeToModify &&
+                _targetGuard != null &&
+                !await _targetGuard.CanModifyAsync(selection.Window, cancellationToken))
+            {
+                LogSupportDiagnostic(captureId, "replacement", "rejected", "target-safety-recheck-failed");
+                return false;
+            }
+            if (InputChanged(selectionInputGeneration))
+            {
+                LogInputChanged(
+                    captureId,
+                    "replacement",
+                    "input-changed-after-safety-recheck",
+                    selectionInputGeneration);
+                return false;
+            }
+            if (!_activeWindow.IsSameActiveWindow(selection.Window))
+            {
+                LogSupportDiagnostic(captureId, "replacement", "rejected", "focus-changed-after-safety-recheck");
+                return false;
+            }
             string? currentSelection;
             if (selectionRead.IsSupported)
             {

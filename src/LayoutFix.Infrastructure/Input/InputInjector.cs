@@ -11,6 +11,9 @@ namespace LayoutFix.Infrastructure.Input;
 
 public class InputInjector : IInputInjector
 {
+    private const int ShortTextSettleDelayMilliseconds = 10;
+    private const int LongTextSettleDelayMilliseconds = 50;
+    private const int ShortTextUnitLimit = 128;
     private readonly Func<Win32.INPUT[], uint> _inputSender;
     private readonly Func<int, bool> _isKeyPressed;
 
@@ -140,7 +143,13 @@ public class InputInjector : IInputInjector
                     (Math.Max(0, sent - batch.PayloadStartIndex) + 1) / 2))
                 .Sum(unit => unit.SourceUtf16Length),
             batch.PhysicalModifiersToRestore);
-        await Task.Delay(50);
+        // Short manual corrections do not need the same queue-settle budget as
+        // a batch containing hundreds or thousands of Unicode key events. Keep
+        // one scheduler turn so the target can consume the atomic SendInput
+        // batch before the coordinator releases its hotkey slot.
+        await Task.Delay(textUnits.Count <= ShortTextUnitLimit
+            ? ShortTextSettleDelayMilliseconds
+            : LongTextSettleDelayMilliseconds);
     }
 
     private static List<TextInjectionUnit> CreateTextInjectionUnits(string text)

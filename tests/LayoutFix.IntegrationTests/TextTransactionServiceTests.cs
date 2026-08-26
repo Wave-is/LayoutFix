@@ -133,6 +133,32 @@ public class TextTransactionServiceTests
     }
 
     [Fact]
+    public async Task VerifiedAccessibilitySelection_ReusesAtomicSafetyProof()
+    {
+        var clipboard = new FakeClipboardService("user clipboard payload");
+        var input = new FakeInputInjector(clipboard);
+        var guard = new SelectedTextTargetGuard("ghbdtn", "ghbdtn")
+        {
+            ReturnVerifiedSelection = true
+        };
+        var service = new TextTransactionService(
+            input,
+            clipboard,
+            new FakeActiveWindowProvider(),
+            new NullLogger(),
+            guard);
+
+        var selection = await service.CaptureAsync(allowPreviousWordFallback: false);
+        var replaced = await service.ReplaceAsync(selection!, "привет");
+
+        Assert.True(replaced);
+        Assert.Equal("привет", input.SentText);
+        Assert.Equal(2, guard.SelectionReadCount);
+        Assert.Equal(0, guard.CanModifyCount);
+        Assert.Equal(0, clipboard.CaptureCount);
+    }
+
+    [Fact]
     public async Task AccessibilitySelection_UsesPreviousWordFallbackWithoutClipboard()
     {
         var clipboard = new FakeClipboardService("user clipboard payload");
@@ -704,20 +730,29 @@ public class TextTransactionServiceTests
     private sealed class SelectedTextTargetGuard(params string?[] selections) : ITextTargetGuard
     {
         private readonly Queue<string?> _selections = new(selections);
+        public bool ReturnVerifiedSelection { get; init; }
+        public int CanModifyCount { get; private set; }
+        public int SelectionReadCount { get; private set; }
 
         public Task<bool> CanModifyAsync(
             ActiveWindowContext context,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(true);
+            CancellationToken cancellationToken = default)
+        {
+            CanModifyCount++;
+            return Task.FromResult(true);
+        }
 
         public Task<TextSelectionReadResult> TryReadSelectedTextAsync(
             ActiveWindowContext context,
             CancellationToken cancellationToken = default)
         {
+            SelectionReadCount++;
             var selection = _selections.Count > 1
                 ? _selections.Dequeue()
                 : _selections.Peek();
-            return Task.FromResult(TextSelectionReadResult.Captured(selection));
+            return Task.FromResult(ReturnVerifiedSelection
+                ? TextSelectionReadResult.Verified(selection)
+                : TextSelectionReadResult.Captured(selection));
         }
     }
 

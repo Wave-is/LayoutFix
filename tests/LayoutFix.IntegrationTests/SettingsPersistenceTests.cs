@@ -487,7 +487,7 @@ public sealed class FileLoggerServiceTests : IDisposable
     {
         var logPath = Path.Combine(_temporaryDirectory, "layoutfix.log");
         var settings = new InMemorySettingsService { Current = new AppSettings { LoggingEnabled = false } };
-        var logger = new FileLoggerService(settings, logPath);
+        using var logger = new FileLoggerService(settings, logPath);
 
         logger.LogInfo("sensitive text must not be written");
 
@@ -499,9 +499,10 @@ public sealed class FileLoggerServiceTests : IDisposable
     {
         var logPath = Path.Combine(_temporaryDirectory, "layoutfix.log");
         var settings = new InMemorySettingsService { Current = new AppSettings { LoggingEnabled = true } };
-        var logger = new FileLoggerService(settings, logPath);
+        using var logger = new FileLoggerService(settings, logPath);
 
         logger.LogInfo("operation completed");
+        logger.Flush();
 
         Assert.Contains("operation completed", File.ReadAllText(logPath));
     }
@@ -511,11 +512,12 @@ public sealed class FileLoggerServiceTests : IDisposable
     {
         var logPath = Path.Combine(_temporaryDirectory, "layoutfix.log");
         var settings = new InMemorySettingsService { Current = new AppSettings { LoggingEnabled = true } };
-        var logger = new FileLoggerService(settings, logPath);
+        using var logger = new FileLoggerService(settings, logPath);
 
         logger.LogError(
             "translation failed",
             new InvalidOperationException("SECRET clipboard text at C:\\Private\\document.txt"));
+        logger.Flush();
 
         var log = File.ReadAllText(logPath);
         Assert.Contains("translation failed", log);
@@ -530,11 +532,12 @@ public sealed class FileLoggerServiceTests : IDisposable
     {
         var logPath = Path.Combine(_temporaryDirectory, "layoutfix.log");
         var settings = new InMemorySettingsService { Current = new AppSettings { LoggingEnabled = true } };
-        var logger = new FileLoggerService(settings, logPath);
+        using var logger = new FileLoggerService(settings, logPath);
 
         logger.LogInfo(
             @"Loading model (C:\Users\Private Person\Sensitive Project\private-model.gguf). " +
             @"Fallback \\private-server\secret-share\customer-name.bin");
+        logger.Flush();
 
         var log = File.ReadAllText(logPath);
         Assert.Contains("Loading model", log);
@@ -552,13 +555,15 @@ public sealed class FileLoggerServiceTests : IDisposable
         var logPath = Path.Combine(_temporaryDirectory, "layoutfix.log");
         var backupPath = logPath + ".bak";
         var settings = new InMemorySettingsService { Current = new AppSettings { LoggingEnabled = true } };
-        var logger = new FileLoggerService(settings, logPath);
+        using var logger = new FileLoggerService(settings, logPath);
 
         logger.LogInfo("initialize logger");
+        logger.Flush();
         using (var stream = new FileStream(logPath, FileMode.Open, FileAccess.Write, FileShare.Read))
             stream.SetLength(5L * 1024 * 1024 + 1);
 
         logger.LogInfo("written after rotation");
+        logger.Flush();
 
         Assert.True(File.Exists(backupPath));
         Assert.True(new FileInfo(backupPath).Length > 5L * 1024 * 1024);
@@ -580,6 +585,8 @@ public sealed class FileLoggerServiceTests : IDisposable
         {
             Parallel.For(0, 2_000, index =>
                 loggers[index % loggers.Length].LogInfo($"concurrent-marker-{index:D4}"));
+            foreach (var logger in loggers)
+                logger.Flush();
 
             var markers = File.ReadLines(logPath)
                 .Where(line => line.Contains("concurrent-marker-", StringComparison.Ordinal))

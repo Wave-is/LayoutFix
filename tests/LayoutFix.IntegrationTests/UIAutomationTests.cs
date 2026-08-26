@@ -481,6 +481,49 @@ public class UIAutomationTests
     }
 
     [Fact]
+    public async Task DuplicateImmediatelyAfterFastCompletion_IsCoalescedWithoutError()
+    {
+        var hook = new FakeKeyboardHook();
+        var transaction = new BlockingThenRecordingTextTransactionService("ghbdtn");
+        var logger = new RecordingLogger();
+        using var coordinator = new HotkeyCoordinator(
+            hook,
+            transaction,
+            new FakeSettingsService(),
+            new FakeKeyboardLayoutManager(),
+            new LayoutConverter(),
+            new TextTransformer(),
+            new TransliterationService(),
+            new NumberToTextConverter(),
+            logger,
+            new RecordingActiveWindowProvider(),
+            new NullSoundService(),
+            new FakeTranslationCoordinator(),
+            new NullTranslatorWindowProvider());
+        coordinator.Initialize();
+
+        hook.Press(HotkeyCombo.Parse("Shift+Scroll"));
+        await transaction.FirstCaptureStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        transaction.ReleaseFirstCapture();
+        await transaction.FirstActionCompleted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await Task.Delay(10);
+
+        var duplicate = hook.Press(HotkeyCombo.Parse("Shift+Scroll"));
+        await Task.Delay(20);
+
+        Assert.True(duplicate.Handled);
+        Assert.Equal(1, transaction.CaptureCount);
+        Assert.Contains(
+            logger.Infos,
+            message => message.Contains("same action recently completed", StringComparison.Ordinal));
+
+        await Task.Delay(75);
+        hook.Press(HotkeyCombo.Parse("Shift+Scroll"));
+        await transaction.SecondCaptureStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(2, transaction.CaptureCount);
+    }
+
+    [Fact]
     public async Task BusyHotkey_FeedbackNeverBlocksHookCallback()
     {
         var hook = new FakeKeyboardHook();

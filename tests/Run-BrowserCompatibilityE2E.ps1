@@ -29,6 +29,32 @@ if (-not (Test-Path $harness)) {
     throw "Windows E2E harness is missing: $harness"
 }
 
+$observedLatencies = [Collections.Generic.List[int]]::new()
+$observedActionLatencies = [Collections.Generic.List[int]]::new()
+function Record-BrowserLatency {
+    param([Parameter(Mandatory)][string]$Case)
+
+    $details = Get-Content -LiteralPath $resultPath -Raw
+    $match = [regex]::Match(
+        $details,
+        'browser-first-press:success=True;elapsedMs=(?<elapsed>\d+)')
+    if (-not $match.Success) {
+        throw "Browser case '$Case' did not emit first-press latency evidence.`n$details"
+    }
+
+    $elapsed = [int]$match.Groups['elapsed'].Value
+    $observedLatencies.Add($elapsed)
+    $actionMatch = [regex]::Match(
+        $details,
+        'browser-action-latency:success=True;elapsedMs=(?<elapsed>\d+)')
+    if (-not $actionMatch.Success) {
+        throw "Browser case '$Case' did not emit internal action latency evidence.`n$details"
+    }
+    $actionElapsed = [int]$actionMatch.Groups['elapsed'].Value
+    $observedActionLatencies.Add($actionElapsed)
+    Write-Output "browser_latency case=$Case visibleMs=$elapsed actionMs=$actionElapsed"
+}
+
 $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $temporaryPrefix = [IO.Path]::TrimEndingDirectorySeparator($temporaryRoot) +
     [IO.Path]::DirectorySeparatorChar
@@ -87,6 +113,7 @@ foreach ($browser in @('edge', 'chrome')) {
                 & $harness "--${browser}-test" $target
                 $exitCode = $LASTEXITCODE
                 if ($exitCode -eq 0) {
+                    Record-BrowserLatency "$browser-$target-selected"
                     # Chromium may keep a profile-scoped utility process alive
                     # briefly after the verified window closes. Clean only the
                     # exact LayoutFix temp profiles before leak verification.
@@ -133,6 +160,7 @@ for ($iteration = 1; $iteration -le $Runs; $iteration++) {
             }
         }
         if ($exitCode -eq 0) {
+            Record-BrowserLatency 'chrome-contenteditable-duplicate'
             Remove-IsolatedBrowserProfiles
             break
         }
@@ -169,6 +197,7 @@ foreach ($target in @('input', 'textarea', 'contenteditable')) {
             Remove-IsolatedBrowserProfiles
             throw "chrome $target caret iteration $iteration/$Runs failed on the first attempt with exit code $exitCode.`n$details"
         }
+        Record-BrowserLatency "chrome-$target-caret"
         Remove-IsolatedBrowserProfiles
     }
 }
@@ -193,6 +222,7 @@ for ($iteration = 1; $iteration -le $Runs; $iteration++) {
         Remove-IsolatedBrowserProfiles
         throw "chrome Shift+Scroll held-modifier iteration $iteration/$Runs failed on the first attempt with exit code $exitCode.`n$details"
     }
+    Record-BrowserLatency 'chrome-input-held-shift'
     $heldEvidence = Get-Content -LiteralPath $resultPath -Raw
     if (-not $heldEvidence.Contains('modifiersHeld=True') -or
         -not $heldEvidence.Contains('browser-hotkey:shift-held-after-success-ms=2200')) {
@@ -231,6 +261,7 @@ foreach ($siblingCase in $siblingCases) {
             Remove-IsolatedBrowserProfiles
             throw "$($siblingCase.Browser) no-op sibling $($siblingCase.Label) iteration $iteration/$Runs failed with exit code $exitCode.`n$details"
         }
+        Record-BrowserLatency "$($siblingCase.Browser)-input-sibling-$($siblingCase.Label)"
         Remove-IsolatedBrowserProfiles
     }
 }
@@ -248,4 +279,12 @@ if ($profileLeaks.Count -ne 0) {
     throw "Browser compatibility E2E left isolated profiles: $($profileLeaks.FullName -join ', ')"
 }
 
-Write-Output "browser_compatibility=pass edge_runs=$Runs chrome_runs=$Runs targets=input,textarea,contenteditable chrome_caret_runs=$Runs chrome_duplicate_contenteditable=$Runs chrome_shift_scroll_held_runs=$Runs no_op_sibling_layout_runs=$($Runs * $siblingCases.Count) first_attempt_only=true latency_gate_ms=1000"
+$sortedLatencies = @($observedLatencies | Sort-Object)
+$medianLatency = $sortedLatencies[[int][Math]::Floor(($sortedLatencies.Count - 1) / 2)]
+$maximumLatency = $sortedLatencies[-1]
+$sortedActionLatencies = @($observedActionLatencies | Sort-Object)
+$medianActionLatency = $sortedActionLatencies[[int][Math]::Floor(($sortedActionLatencies.Count - 1) / 2)]
+$maximumActionLatency = $sortedActionLatencies[-1]
+Write-Output "browser_latency_summary samples=$($sortedLatencies.Count) visibleMedianMs=$medianLatency visibleMaxMs=$maximumLatency actionMedianMs=$medianActionLatency actionMaxMs=$maximumActionLatency"
+
+Write-Output "browser_compatibility=pass edge_runs=$Runs chrome_runs=$Runs targets=input,textarea,contenteditable chrome_caret_runs=$Runs chrome_duplicate_contenteditable=$Runs chrome_shift_scroll_held_runs=$Runs no_op_sibling_layout_runs=$($Runs * $siblingCases.Count) first_attempt_only=true latency_gate_ms=750"
