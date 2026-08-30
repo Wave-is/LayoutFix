@@ -97,6 +97,7 @@ public sealed class TextTransactionService : ITextTransactionService
                 {
                     if ((string.IsNullOrEmpty(directCapture.Text) ||
                          string.IsNullOrEmpty(directCapture.AdapterId)) &&
+                        directCapture.AllowSelectionFallback &&
                         allowPreviousWordFallback &&
                         !InputChanged(captureInputGeneration) &&
                         _activeWindow.IsSameActiveWindow(window))

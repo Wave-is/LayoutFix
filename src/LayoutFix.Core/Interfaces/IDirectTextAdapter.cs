@@ -5,15 +5,19 @@ namespace LayoutFix.Core.Interfaces;
 public readonly record struct DirectTextCaptureResult(
     bool IsApplicable,
     string? Text,
-    string? AdapterId)
+    string? AdapterId,
+    bool AllowSelectionFallback)
 {
-    public static DirectTextCaptureResult NotApplicable => new(false, null, null);
+    public static DirectTextCaptureResult NotApplicable => new(false, null, null, false);
 
     public static DirectTextCaptureResult Rejected(string adapterId) =>
-        new(true, null, adapterId);
+        new(true, null, adapterId, false);
+
+    public static DirectTextCaptureResult SelectionMissing(string adapterId) =>
+        new(true, null, adapterId, true);
 
     public static DirectTextCaptureResult Captured(string adapterId, string text) =>
-        new(true, text, adapterId);
+        new(true, text, adapterId, false);
 }
 
 public interface IDirectTextAdapter

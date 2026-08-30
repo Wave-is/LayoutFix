@@ -101,11 +101,11 @@ public class TextTransactionServiceTests
         var selection = await service.CaptureAsync(allowPreviousWordFallback: true);
 
         Assert.Null(selection);
-        Assert.Equal(2, adapter.CaptureCount);
+        Assert.Equal(1, adapter.CaptureCount);
         Assert.Equal(0, adapter.ReplaceCount);
         Assert.Equal(0, clipboard.CaptureCount);
-        Assert.Equal(1, input.SelectWordCount);
-        Assert.Equal(1, input.CollapseSelectionCount);
+        Assert.Equal(0, input.SelectWordCount);
+        Assert.Equal(0, input.CollapseSelectionCount);
         Assert.Equal("user clipboard payload", clipboard.Value);
     }
 
@@ -188,7 +188,7 @@ public class TextTransactionServiceTests
         var clipboard = new FakeClipboardService("complex user clipboard payload");
         var input = new FakeInputInjector(clipboard);
         var adapter = new FakeDirectTextAdapter(
-            DirectTextCaptureResult.Rejected("test-direct"),
+            DirectTextCaptureResult.SelectionMissing("test-direct"),
             DirectTextCaptureResult.Captured("test-direct", "ghbdtn"));
         var service = new TextTransactionService(
             input,

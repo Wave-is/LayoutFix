@@ -57,20 +57,14 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
             return false;
         }
 
-        // Every supported Adobe profile resolves to a real, focused Win32 Edit
-        // HWND. Prefer its bounded native selection contract over UI Automation:
-        // Premiere 26.x exposes ordinary Edit fields whose accessibility parent
-        // is not the historical OS_EditTextContainer used by inline rename.
-        // Requiring that parent made the adapter claim the field and then reject
-        // every manual correction before the generic path could run.
-        var nativeEditAvailable = await RunBoundedAsync(
-            () => TryGetNativeEditSelection(
-                context,
-                out _,
-                out _),
-            timeoutResult: false,
-            cancellationToken);
-        if (nativeEditAvailable)
+        // Photoshop's Save dialog is a native Windows dialog with an exact
+        // process/window/control profile, so its Edit contract is sufficient.
+        // Premiere and After Effects, however, expose unrelated internal fields
+        // through the same generic Edit class. Sending EM_REPLACESEL to one of
+        // those fields can return successfully and still leave Adobe's UI thread
+        // deadlocked. Keep their native replacement behind the stronger UIA
+        // OS_EditTextContainer rename proof used by the stable v1.0.20 path.
+        if (UsesNativeDialogContract(adapterId))
         {
             return await RunBoundedAsync(
                 () => ReplaceNativeEditSelection(
@@ -79,14 +73,6 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
                     replacement),
                 timeoutResult: false,
                 cancellationToken);
-        }
-
-        if (string.Equals(
-                adapterId,
-                PhotoshopSaveDialogAdapterId,
-                StringComparison.Ordinal))
-        {
-            return false;
         }
 
         if (!await RunBoundedAsync(
@@ -110,22 +96,19 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
         ActiveWindowContext context,
         string adapterId)
     {
-        if (TryGetNativeEditSelection(
-                context,
-                out _,
-                out var nativeSelectedText))
+        if (UsesNativeDialogContract(adapterId))
         {
+            if (!TryGetNativeEditSelection(
+                    context,
+                    out _,
+                    out var nativeSelectedText))
+            {
+                return DirectTextCaptureResult.Rejected(adapterId);
+            }
+
             return nativeSelectedText.Length > 0
                 ? DirectTextCaptureResult.Captured(adapterId, nativeSelectedText)
-                : DirectTextCaptureResult.Rejected(adapterId);
-        }
-
-        if (string.Equals(
-                adapterId,
-                PhotoshopSaveDialogAdapterId,
-                StringComparison.Ordinal))
-        {
-            return DirectTextCaptureResult.Rejected(adapterId);
+                : DirectTextCaptureResult.SelectionMissing(adapterId);
         }
 
         var element = AutomationElement.FocusedElement;
@@ -140,7 +123,7 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
 
         var selectedText = selections[0].GetText(-1);
         return string.IsNullOrEmpty(selectedText)
-            ? DirectTextCaptureResult.Rejected(adapterId)
+            ? DirectTextCaptureResult.SelectionMissing(adapterId)
             : DirectTextCaptureResult.Captured(adapterId, selectedText);
     }
 
@@ -473,6 +456,12 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
                 accessibleName,
                 expectedAccessibleName,
                 StringComparison.Ordinal));
+
+    internal static bool UsesNativeDialogContract(string adapterId) =>
+        string.Equals(
+            adapterId,
+            PhotoshopSaveDialogAdapterId,
+            StringComparison.Ordinal);
 
     private bool TryGetAdapterId(
         ActiveWindowContext context,

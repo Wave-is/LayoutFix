@@ -1,5 +1,6 @@
 using LayoutFix.Core.Interfaces;
 using LayoutFix.Infrastructure.Hooks;
+using LayoutFix.Infrastructure.Services;
 
 namespace LayoutFix.Tests;
 
@@ -23,8 +24,9 @@ public sealed class AppHostTests : IDisposable
             services.GetService(typeof(ISettingsService)));
         settings.Current.LoggingEnabled = true;
         settings.Current.TranslationHistoryEnabled = true;
-        Assert.IsAssignableFrom<ILoggerService>(services.GetService(typeof(ILoggerService)))
-            .LogInfo("isolated-profile-probe");
+        var logger = Assert.IsType<FileLoggerService>(
+            services.GetService(typeof(ILoggerService)));
+        logger.LogInfo("isolated-profile-probe");
         await Assert.IsAssignableFrom<ITranslationHistoryService>(
             services.GetService(typeof(ITranslationHistoryService))).AddEntryAsync(new()
         {
@@ -33,6 +35,7 @@ public sealed class AppHostTests : IDisposable
             SourceLang = "en",
             TargetLang = "ru"
         });
+        logger.Flush();
 
         Assert.True(File.Exists(settingsPath));
         Assert.True(File.Exists(historyPath));

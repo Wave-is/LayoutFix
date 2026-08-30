@@ -49,6 +49,20 @@ public class AdobeInlineRenameTextAdapterTests
     }
 
     [Theory]
+    [InlineData("photoshop-save-dialog-v1", true)]
+    [InlineData("premiere-rename-v1", false)]
+    [InlineData("after-effects-rename-v1", false)]
+    [InlineData("", false)]
+    public void NativeDialogContract_IsRestrictedToExactWindowsDialogProfile(
+        string adapterId,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            AdobeInlineRenameTextAdapter.UsesNativeDialogContract(adapterId));
+    }
+
+    [Theory]
     [InlineData("UI_TextEdit", "TEST")]
     [InlineData("TEST", "TEST")]
     [InlineData("привет", "привет")]
