@@ -1,3 +1,4 @@
+using LayoutFix.Core.Interfaces;
 using LayoutFix.Infrastructure.Services;
 using System.Windows.Forms;
 
@@ -6,10 +7,10 @@ namespace LayoutFix.IntegrationTests;
 public class AdobeInlineRenameTextAdapterTests
 {
     [Theory]
-    [InlineData("AfterFX", "AE_CApplication_25.0", "Edit", "after-effects-rename-v1")]
-    [InlineData("afterfx", "AE_CApplication_25.3", "Edit", "after-effects-rename-v1")]
-    [InlineData("Adobe Premiere Pro", "Premiere Pro", "Edit", "premiere-rename-v1")]
-    [InlineData("Adobe Premiere Pro", "DroverLord - Window Class", "Edit", "premiere-rename-v1")]
+    [InlineData("AfterFX", "AE_CApplication_25.0", "Edit", "after-effects-rename-paste-v2")]
+    [InlineData("afterfx", "AE_CApplication_25.3", "Edit", "after-effects-rename-paste-v2")]
+    [InlineData("Adobe Premiere Pro", "Premiere Pro", "Edit", "premiere-rename-paste-v2")]
+    [InlineData("Adobe Premiere Pro", "DroverLord - Window Class", "Edit", "premiere-rename-paste-v2")]
     [InlineData("Photoshop", "#32770", "Edit", "photoshop-save-dialog-v1")]
     [InlineData("photoshop", "#32770", "Edit", "photoshop-save-dialog-v1")]
     public void ResolveAdapterId_AcceptsOnlyProvenAdobeApplicationProfiles(
@@ -48,100 +49,6 @@ public class AdobeInlineRenameTextAdapterTests
             focusedClass));
     }
 
-    [Theory]
-    [InlineData("photoshop-save-dialog-v1", true)]
-    [InlineData("premiere-rename-v1", false)]
-    [InlineData("after-effects-rename-v1", false)]
-    [InlineData("", false)]
-    public void NativeDialogContract_IsRestrictedToExactWindowsDialogProfile(
-        string adapterId,
-        bool expected)
-    {
-        Assert.Equal(
-            expected,
-            AdobeInlineRenameTextAdapter.UsesNativeDialogContract(adapterId));
-    }
-
-    [Theory]
-    [InlineData("UI_TextEdit", "TEST")]
-    [InlineData("TEST", "TEST")]
-    [InlineData("привет", "привет")]
-    public void IsSupportedAccessibleName_AcceptsAdobeStableOrValueBackedName(
-        string accessibleName,
-        string currentValue)
-    {
-        Assert.True(AdobeInlineRenameTextAdapter.IsSupportedAccessibleName(
-            accessibleName,
-            currentValue));
-    }
-
-    [Fact]
-    public void IsSupportedAccessibleName_AcceptsCapturedNameWhileAdobeValueUpdates()
-    {
-        Assert.True(AdobeInlineRenameTextAdapter.IsSupportedAccessibleName(
-            "ghbdtn",
-            "привет",
-            expectedAccessibleName: "ghbdtn"));
-    }
-
-    [Theory]
-    [InlineData("Other", "TEST")]
-    [InlineData("test", "TEST")]
-    [InlineData("", "TEST")]
-    [InlineData("", "")]
-    public void IsSupportedAccessibleName_RejectsAmbiguousOrMismatchedName(
-        string accessibleName,
-        string currentValue)
-    {
-        Assert.False(AdobeInlineRenameTextAdapter.IsSupportedAccessibleName(
-            accessibleName,
-            currentValue));
-    }
-
-    [Fact]
-    public void IsSupportedAccessibleName_RejectsUnrelatedNameDuringReplacement()
-    {
-        Assert.False(AdobeInlineRenameTextAdapter.IsSupportedAccessibleName(
-            "Other",
-            "привет",
-            expectedAccessibleName: "ghbdtn"));
-    }
-
-    [Fact]
-    public void NativeEditReplacement_ChangesOnlySelectedTextWithoutClipboard()
-    {
-        Exception? failure = null;
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                using var editor = new TextBox { Text = "before ghbdtn after" };
-                _ = editor.Handle;
-                editor.Select(7, 6);
-
-                var replaced = AdobeInlineRenameTextAdapter.TryReplaceNativeSelection(
-                    editor.Handle,
-                    editor.Text,
-                    "ghbdtn",
-                    "привет",
-                    out var expectedValue);
-
-                Assert.True(replaced);
-                Assert.Equal("before привет after", expectedValue);
-                Assert.Equal(expectedValue, editor.Text);
-            }
-            catch (Exception exception)
-            {
-                failure = exception;
-            }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        Assert.True(thread.Join(TimeSpan.FromSeconds(5)));
-        if (failure != null)
-            throw failure;
-    }
-
     [Fact]
     public void NativeEditCapture_ReadsOnlySelectedTextWithoutClipboard()
     {
@@ -173,5 +80,147 @@ public class AdobeInlineRenameTextAdapterTests
         Assert.True(thread.Join(TimeSpan.FromSeconds(5)));
         if (failure != null)
             throw failure;
+    }
+
+    [Fact]
+    public void AllAdobeAdaptersUseClipboardPasteAndRejectLegacyPremiereContract()
+    {
+        Assert.Equal(
+            AdobeInlineRenameTextAdapter.ReplacementContract.ClipboardPaste,
+            AdobeInlineRenameTextAdapter.ResolveReplacementContract(
+                "premiere-rename-paste-v2"));
+        Assert.Equal(
+            AdobeInlineRenameTextAdapter.ReplacementContract.ClipboardPaste,
+            AdobeInlineRenameTextAdapter.ResolveReplacementContract(
+                "after-effects-rename-paste-v2"));
+        Assert.Equal(
+            AdobeInlineRenameTextAdapter.ReplacementContract.ClipboardPaste,
+            AdobeInlineRenameTextAdapter.ResolveReplacementContract(
+                "photoshop-save-dialog-v1"));
+        Assert.Equal(
+            AdobeInlineRenameTextAdapter.ReplacementContract.Rejected,
+            AdobeInlineRenameTextAdapter.ResolveReplacementContract(
+                "premiere-rename-v1"));
+    }
+
+    [Fact]
+    public async Task ClipboardPasteTransaction_RevalidatesPastesAndRestoresClipboard()
+    {
+        var clipboard = new AdapterClipboard("user-rich-clipboard");
+        var target = "ghbdtn";
+        var input = new AdapterInput(() => target = clipboard.Value);
+
+        var result = await AdobeInlineRenameTextAdapter.ExecuteClipboardPasteAsync(
+            input,
+            clipboard,
+            "привет",
+            _ => Task.FromResult(target == "ghbdtn" && clipboard.Value == "привет"),
+            _ => Task.FromResult(target == "привет"),
+            CancellationToken.None);
+
+        Assert.True(result);
+        Assert.Equal(1, input.PasteCount);
+        Assert.Equal("привет", target);
+        Assert.Equal("user-rich-clipboard", clipboard.Value);
+        Assert.Equal(1, clipboard.RestoreCount);
+    }
+
+    [Fact]
+    public async Task ClipboardPasteTransaction_RevalidationFailureRestoresWithoutInput()
+    {
+        var clipboard = new AdapterClipboard("user-rich-clipboard");
+        var input = new AdapterInput(() => throw new InvalidOperationException());
+
+        var result = await AdobeInlineRenameTextAdapter.ExecuteClipboardPasteAsync(
+            input,
+            clipboard,
+            "привет",
+            _ => Task.FromResult(false),
+            _ => Task.FromResult(false),
+            CancellationToken.None);
+
+        Assert.False(result);
+        Assert.Equal(0, input.PasteCount);
+        Assert.Equal("user-rich-clipboard", clipboard.Value);
+        Assert.Equal(1, clipboard.RestoreCount);
+    }
+
+    [Fact]
+    public async Task ClipboardPasteTransaction_InputFailureStillRestoresClipboard()
+    {
+        var clipboard = new AdapterClipboard("user-rich-clipboard");
+        var input = new AdapterInput(() => throw new InvalidOperationException("blocked"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            AdobeInlineRenameTextAdapter.ExecuteClipboardPasteAsync(
+                input,
+                clipboard,
+                "привет",
+                _ => Task.FromResult(true),
+                _ => Task.FromResult(false),
+                CancellationToken.None));
+
+        Assert.Equal(1, input.PasteCount);
+        Assert.Equal("user-rich-clipboard", clipboard.Value);
+        Assert.Equal(1, clipboard.RestoreCount);
+    }
+
+    private sealed class AdapterInput(Action paste) : IInputInjector
+    {
+        public int PasteCount { get; private set; }
+
+        public Task SendKeyCombinationAsync(bool ctrl, bool alt, bool shift, string key)
+        {
+            Assert.True(ctrl);
+            Assert.False(alt);
+            Assert.False(shift);
+            Assert.Equal("v", key);
+            PasteCount++;
+            paste();
+            return Task.CompletedTask;
+        }
+
+        public Task SendBackspacesAsync(int count) => Task.CompletedTask;
+        public Task SendTextAsync(string text) => Task.CompletedTask;
+        public Task SelectWordLeftAsync() => Task.CompletedTask;
+        public Task WaitForModifiersReleaseAsync(int timeoutMs = 2000) => Task.CompletedTask;
+    }
+
+    private sealed class AdapterClipboard(string value) : IClipboardService
+    {
+        public string Value { get; private set; } = value;
+        public int RestoreCount { get; private set; }
+
+        public Task<IClipboardSnapshot> CaptureAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IClipboardSnapshot>(new AdapterSnapshot(Value));
+
+        public Task RestoreAsync(
+            IClipboardSnapshot snapshot,
+            CancellationToken cancellationToken = default)
+        {
+            Value = Assert.IsType<AdapterSnapshot>(snapshot).Value;
+            RestoreCount++;
+            return Task.CompletedTask;
+        }
+
+        public Task<string?> ReadTextAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>(Value);
+
+        public Task SetTextAsync(
+            string text,
+            CancellationToken cancellationToken = default)
+        {
+            Value = text;
+            return Task.CompletedTask;
+        }
+
+        public uint GetSequenceNumber() => 0;
+        public void Dispose() { }
+    }
+
+    private sealed record AdapterSnapshot(string Value) : IClipboardSnapshot
+    {
+        public void Dispose() { }
     }
 }

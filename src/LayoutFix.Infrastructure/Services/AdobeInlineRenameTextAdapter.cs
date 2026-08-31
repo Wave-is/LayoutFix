@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Text;
-using System.Windows.Automation;
 using LayoutFix.Core.Interfaces;
 using LayoutFix.Core.Models;
 using LayoutFix.Infrastructure.Native;
@@ -9,21 +8,33 @@ namespace LayoutFix.Infrastructure.Services;
 
 public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposable
 {
-    internal const string AfterEffectsAdapterId = "after-effects-rename-v1";
-    internal const string PremiereAdapterId = "premiere-rename-v1";
+    internal enum ReplacementContract
+    {
+        Rejected,
+        ClipboardPaste
+    }
+
+    internal const string AfterEffectsAdapterId = "after-effects-rename-paste-v2";
+    internal const string PremiereAdapterId = "premiere-rename-paste-v2";
     internal const string PhotoshopSaveDialogAdapterId = "photoshop-save-dialog-v1";
     private const int MaximumNativeEditLength = 32_767;
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromMilliseconds(300);
     private readonly IActiveWindowProvider _activeWindow;
+    private readonly IInputInjector _input;
+    private readonly IClipboardService _clipboard;
     private readonly ILoggerService _logger;
     private readonly SemaphoreSlim _probeGate = new(1, 1);
     private volatile bool _disposed;
 
     public AdobeInlineRenameTextAdapter(
         IActiveWindowProvider activeWindow,
+        IInputInjector input,
+        IClipboardService clipboard,
         ILoggerService logger)
     {
         _activeWindow = activeWindow;
+        _input = input;
+        _clipboard = clipboard;
         _logger = logger;
     }
 
@@ -57,46 +68,114 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
             return false;
         }
 
-        // Photoshop's Save dialog is a native Windows dialog with an exact
-        // process/window/control profile, so its Edit contract is sufficient.
-        // Premiere and After Effects, however, expose unrelated internal fields
-        // through the same generic Edit class. Sending EM_REPLACESEL to one of
-        // those fields can return successfully and still leave Adobe's UI thread
-        // deadlocked. Keep their native replacement behind the stronger UIA
-        // OS_EditTextContainer rename proof used by the stable v1.0.20 path.
-        if (UsesNativeDialogContract(adapterId))
-        {
-            return await RunBoundedAsync(
-                () => ReplaceNativeEditSelection(
-                    context,
-                    expectedText,
-                    replacement),
-                timeoutResult: false,
-                cancellationToken);
-        }
+        // Every supported Adobe field uses the safe user-paste contract. Native
+        // messages may inspect the focused selection but never mutate it.
+        var replacementContract = ResolveReplacementContract(adapterId);
+        if (replacementContract != ReplacementContract.ClipboardPaste)
+            return false;
 
-        if (!await RunBoundedAsync(
-            () => ValidateReplacementCore(context, expectedText),
-            timeoutResult: false,
-            cancellationToken))
+        var expectedValue = await RunBoundedAsync(
+            () => BuildExpectedPasteReplacementCore(
+                context,
+                expectedText,
+                replacement),
+            timeoutResult: null,
+            cancellationToken);
+        if (expectedValue == null)
         {
+            _logger.LogInfo(
+                $"AdobeAdapterDiagnostic: Adapter={adapterId}; Strategy=clipboard-paste-v2; " +
+                $"Outcome=rejected; Phase=preflight; Reason=selection-changed; " +
+                $"SourceLength={expectedText.Length}; ResultLength={replacement.Length}.");
             return false;
         }
 
-        // Adobe's rename field is a real Win32 Edit control. EM_REPLACESEL changes
-        // only its proven selection, keeps the rename transaction open, and does not
-        // touch the user's clipboard (which may contain delayed Adobe/OLE formats).
-        return await RunBoundedAsync(
-            () => ReplaceSelectionCore(context, expectedText, replacement),
-            timeoutResult: false,
-            cancellationToken);
+        // Premiere and After Effects own an internal edit transaction around these
+        // transient controls. A synchronous cross-process EM_REPLACESEL can report
+        // success and still deadlock that transaction later (for example on Save).
+        // Drive the proven field exactly as a user does instead. Preserve every
+        // clipboard format, revalidate immediately before Ctrl+V, verify the exact
+        // resulting value before restoring the clipboard, and always restore it.
+        var timer = Stopwatch.StartNew();
+        var phase = "revalidation";
+        try
+        {
+            var result = await ExecuteClipboardPasteAsync(
+                _input,
+                _clipboard,
+                replacement,
+                async token =>
+                {
+                    var revalidatedValue = await RunBoundedAsync(
+                        () => BuildExpectedPasteReplacementCore(
+                            context,
+                            expectedText,
+                            replacement),
+                        timeoutResult: null,
+                        token);
+                    return string.Equals(
+                        revalidatedValue,
+                        expectedValue,
+                        StringComparison.Ordinal);
+                },
+                token =>
+                {
+                    phase = "verification";
+                    return VerifyReplacementAfterPasteAsync(
+                        context,
+                        expectedValue,
+                        token);
+                },
+                cancellationToken);
+            _logger.LogInfo(
+                $"AdobeAdapterDiagnostic: Adapter={adapterId}; Strategy=clipboard-paste-v2; " +
+                $"Outcome={(result ? "accepted" : "rejected")}; Phase={phase}; " +
+                $"SourceLength={expectedText.Length}; ResultLength={replacement.Length}; " +
+                $"DurationMs={timer.ElapsedMilliseconds}.");
+            return result;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                $"AdobeAdapterDiagnostic: Adapter={adapterId}; Strategy=clipboard-paste-v2; " +
+                $"Outcome=failed; Phase={phase}; ExceptionType={exception.GetType().FullName}; " +
+                $"HResult=0x{exception.HResult:X8}; DurationMs={timer.ElapsedMilliseconds}.");
+            throw;
+        }
+    }
+
+    internal static async Task<bool> ExecuteClipboardPasteAsync(
+        IInputInjector input,
+        IClipboardService clipboard,
+        string replacement,
+        Func<CancellationToken, Task<bool>> revalidate,
+        Func<CancellationToken, Task<bool>> verify,
+        CancellationToken cancellationToken)
+    {
+        using var snapshot = await clipboard.CaptureAsync(cancellationToken);
+        try
+        {
+            await clipboard.SetTextAsync(replacement, cancellationToken);
+            if (!await revalidate(cancellationToken))
+                return false;
+
+            // InputInjector neutralizes a still-held Shift/Ctrl/Alt/Win key in the
+            // same atomic SendInput batch, so Shift+Scroll cannot turn this into
+            // Ctrl+Shift+V and no two-second modifier wait is added.
+            await input.SendKeyCombinationAsync(true, false, false, "v");
+            return await verify(cancellationToken);
+        }
+        finally
+        {
+            await clipboard.RestoreAsync(snapshot, CancellationToken.None);
+        }
     }
 
     private DirectTextCaptureResult CaptureCore(
         ActiveWindowContext context,
         string adapterId)
     {
-        if (UsesNativeDialogContract(adapterId))
+        if (ResolveReplacementContract(adapterId) == ReplacementContract.ClipboardPaste)
         {
             if (!TryGetNativeEditSelection(
                     context,
@@ -111,50 +190,10 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
                 : DirectTextCaptureResult.SelectionMissing(adapterId);
         }
 
-        var element = AutomationElement.FocusedElement;
-        if (!TryGetRenamePatterns(context, element, out var value, out var text))
-            return DirectTextCaptureResult.Rejected(adapterId);
-
-        var selections = text.GetSelection();
-        if (selections.Length != 1)
-        {
-            return DirectTextCaptureResult.Rejected(adapterId);
-        }
-
-        var selectedText = selections[0].GetText(-1);
-        return string.IsNullOrEmpty(selectedText)
-            ? DirectTextCaptureResult.SelectionMissing(adapterId)
-            : DirectTextCaptureResult.Captured(adapterId, selectedText);
+        return DirectTextCaptureResult.Rejected(adapterId);
     }
 
-    private bool ValidateReplacementCore(
-        ActiveWindowContext context,
-        string expectedText)
-    {
-        var element = AutomationElement.FocusedElement;
-        if (!TryGetRenamePatterns(
-            context,
-            element,
-            out var value,
-            out var text,
-            expectedAccessibleName: expectedText))
-            return false;
-
-        var selections = text.GetSelection();
-        if (selections.Length != 1 ||
-            !string.Equals(
-                selections[0].GetText(-1),
-                expectedText,
-                StringComparison.Ordinal) ||
-            !_activeWindow.IsSameActiveWindow(context))
-        {
-            return false;
-        }
-
-        return true;
-    }
-
-    private bool ReplaceNativeEditSelection(
+    private string? BuildExpectedPasteReplacementCore(
         ActiveWindowContext context,
         string expectedText,
         string replacement)
@@ -163,103 +202,69 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
                 context,
                 out var currentValue,
                 out var selectedText) ||
-            !string.Equals(selectedText, expectedText, StringComparison.Ordinal) ||
-            !_activeWindow.IsSameActiveWindow(context) ||
-            !TryReplaceNativeSelection(
-                context.FocusedWindow,
-                currentValue,
-                expectedText,
-                replacement,
-                out var expectedValue) ||
-            !_activeWindow.IsSameActiveWindow(context))
+            !string.Equals(selectedText, expectedText, StringComparison.Ordinal))
         {
-            return false;
+            return null;
         }
 
-        return TryReadNativeEditSelection(
-                context.FocusedWindow,
-                out var verifiedValue,
-                out _) &&
-            string.Equals(verifiedValue, expectedValue, StringComparison.Ordinal) &&
-            _activeWindow.IsSameActiveWindow(context);
-    }
-
-    private bool ReplaceSelectionCore(
-        ActiveWindowContext context,
-        string expectedText,
-        string replacement)
-    {
-        var element = AutomationElement.FocusedElement;
-        if (!TryGetRenamePatterns(
-                context,
-                element,
-                out var value,
-                out var text,
-                expectedAccessibleName: expectedText) ||
-            !_activeWindow.IsSameActiveWindow(context))
-        {
-            return false;
-        }
-
-        var selections = text.GetSelection();
-        var currentValue = value.Current.Value;
-        if (selections.Length != 1 ||
-            !string.Equals(selections[0].GetText(-1), expectedText, StringComparison.Ordinal) ||
-            !TryGetSelectionRange(context.FocusedWindow, currentValue, expectedText, out var start, out var end))
-        {
-            return false;
-        }
-
-        if (!TryReplaceNativeSelection(
-                context.FocusedWindow,
-                currentValue,
-                expectedText,
-                replacement,
-                out var expectedValue) ||
-            !_activeWindow.IsSameActiveWindow(context))
-            return false;
-
-        var currentElement = AutomationElement.FocusedElement;
-        return TryGetRenamePatterns(
-                context,
-                currentElement,
-                out var currentValuePattern,
-                out _,
-                expectedAccessibleName: expectedText) &&
-            string.Equals(currentValuePattern.Current.Value, expectedValue, StringComparison.Ordinal) &&
-            _activeWindow.IsSameActiveWindow(context);
-    }
-
-    internal static bool TryReplaceNativeSelection(
-        IntPtr editWindow,
-        string currentValue,
-        string expectedText,
-        string replacement,
-        out string expectedValue)
-    {
-        expectedValue = currentValue;
+        // EM_GETSEL is bounded and read-only. It supplies the exact offset when
+        // the same substring occurs more than once; EM_REPLACESEL is never used
+        // for Premiere or After Effects.
         if (!TryGetSelectionRange(
-                editWindow,
+                context.FocusedWindow,
                 currentValue,
                 expectedText,
                 out var start,
-                out var end))
+                out var end) ||
+            !_activeWindow.IsSameActiveWindow(context))
         {
-            return false;
+            return null;
         }
 
-        expectedValue = string.Concat(
+        return string.Concat(
             currentValue.AsSpan(0, start),
             replacement.AsSpan(),
             currentValue.AsSpan(end));
-        return Win32.SendMessageTimeout(
-            editWindow,
-            Win32.EM_REPLACESEL,
-            new IntPtr(1),
-            replacement,
-            Win32.SMTO_BLOCK | Win32.SMTO_ABORTIFHUNG,
-            150,
-            out _) != IntPtr.Zero;
+    }
+
+    private async Task<bool> VerifyReplacementAfterPasteAsync(
+        ActiveWindowContext context,
+        string expectedValue,
+        CancellationToken cancellationToken)
+    {
+        const int verificationAttempts = 6;
+        for (var attempt = 0; attempt < verificationAttempts; attempt++)
+        {
+            if (attempt > 0)
+                await Task.Delay(15, cancellationToken);
+
+            if (await RunBoundedAsync(
+                () => VerifyPasteReplacementCore(
+                    context,
+                    expectedValue),
+                timeoutResult: false,
+                cancellationToken))
+            {
+                return true;
+            }
+
+            if (!_activeWindow.IsSameActiveWindow(context))
+                return false;
+        }
+
+        return false;
+    }
+
+    private bool VerifyPasteReplacementCore(
+        ActiveWindowContext context,
+        string expectedValue)
+    {
+        return TryGetNativeEditSelection(
+                context,
+                out var currentValue,
+                out _) &&
+            string.Equals(currentValue, expectedValue, StringComparison.Ordinal) &&
+            _activeWindow.IsSameActiveWindow(context);
     }
 
     internal static bool TryGetSelectionRange(
@@ -388,80 +393,17 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
             out selectedText);
     }
 
-    private static bool TryGetRenamePatterns(
-        ActiveWindowContext context,
-        AutomationElement? element,
-        out ValuePattern value,
-        out TextPattern text,
-        string? expectedAccessibleName = null)
+    internal static ReplacementContract ResolveReplacementContract(string adapterId)
     {
-        value = null!;
-        text = null!;
-        if (element == null)
-            return false;
-
-        var current = element.Current;
-        if (current.ProcessId != context.ProcessId ||
-            current.NativeWindowHandle != context.FocusedWindow ||
-            current.ControlType != ControlType.Edit ||
-            !string.Equals(current.ClassName, "Edit", StringComparison.Ordinal) ||
-            !string.Equals(current.AutomationId, "1", StringComparison.Ordinal) ||
-            !current.IsEnabled ||
-            !current.IsKeyboardFocusable ||
-            !current.HasKeyboardFocus ||
-            current.IsPassword ||
-            !element.TryGetCurrentPattern(ValuePattern.Pattern, out var valueObject) ||
-            valueObject is not ValuePattern valuePattern ||
-            valuePattern.Current.IsReadOnly ||
-            !element.TryGetCurrentPattern(TextPattern.Pattern, out var textObject) ||
-            textObject is not TextPattern textPattern)
+        if (string.Equals(adapterId, PremiereAdapterId, StringComparison.Ordinal) ||
+            string.Equals(adapterId, AfterEffectsAdapterId, StringComparison.Ordinal) ||
+            string.Equals(adapterId, PhotoshopSaveDialogAdapterId, StringComparison.Ordinal))
         {
-            return false;
+            return ReplacementContract.ClipboardPaste;
         }
 
-        var parent = TreeWalker.ControlViewWalker.GetParent(element);
-        if (parent == null ||
-            parent.Current.ProcessId != context.ProcessId ||
-            parent.Current.ControlType != ControlType.Pane ||
-            !string.Equals(
-                parent.Current.Name,
-                "OS_EditTextContainer",
-                StringComparison.Ordinal) ||
-            !string.Equals(
-                parent.Current.ClassName,
-                "DroverLord - Window Class",
-                StringComparison.Ordinal) ||
-            !IsSupportedAccessibleName(
-                current.Name,
-                valuePattern.Current.Value,
-                expectedAccessibleName))
-        {
-            return false;
-        }
-
-        value = valuePattern;
-        text = textPattern;
-        return true;
+        return ReplacementContract.Rejected;
     }
-
-    internal static bool IsSupportedAccessibleName(
-        string accessibleName,
-        string currentValue,
-        string? expectedAccessibleName = null) =>
-        string.Equals(accessibleName, "UI_TextEdit", StringComparison.Ordinal) ||
-        (!string.IsNullOrEmpty(currentValue) &&
-            string.Equals(accessibleName, currentValue, StringComparison.Ordinal)) ||
-        (!string.IsNullOrEmpty(expectedAccessibleName) &&
-            string.Equals(
-                accessibleName,
-                expectedAccessibleName,
-                StringComparison.Ordinal));
-
-    internal static bool UsesNativeDialogContract(string adapterId) =>
-        string.Equals(
-            adapterId,
-            PhotoshopSaveDialogAdapterId,
-            StringComparison.Ordinal);
 
     private bool TryGetAdapterId(
         ActiveWindowContext context,

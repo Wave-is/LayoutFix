@@ -376,6 +376,8 @@ internal static class Program
         using var targetGuard = new WindowsTextTargetGuard(activeWindow, logger, settings);
         using var directTextAdapter = new AdobeInlineRenameTextAdapter(
             activeWindow,
+            input,
+            clipboard,
             logger);
         var textTransaction = new TextTransactionService(
             input,

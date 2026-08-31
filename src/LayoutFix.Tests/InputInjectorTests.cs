@@ -180,6 +180,36 @@ public class InputInjectorTests
     }
 
     [Fact]
+    public async Task PasteChordTemporarilyNeutralizesHeldPhysicalShift()
+    {
+        Win32.INPUT[]? sentInputs = null;
+        var injector = new InputInjector(
+            inputs =>
+            {
+                sentInputs = inputs;
+                return (uint)inputs.Length;
+            },
+            virtualKey => virtualKey == Win32.VK_SHIFT);
+
+        await injector.SendKeyCombinationAsync(true, false, false, "v");
+
+        Assert.NotNull(sentInputs);
+        Assert.Equal(
+            new[]
+            {
+                (Win32.VK_SHIFT, true),
+                (Win32.VK_CONTROL, false),
+                ((int)'V', false),
+                ((int)'V', true),
+                (Win32.VK_CONTROL, true),
+                (Win32.VK_SHIFT, false)
+            },
+            sentInputs!.Select(input => (
+                (int)input.u.ki.wVk,
+                (input.u.ki.dwFlags & Win32.KEYEVENTF_KEYUP) != 0)).ToArray());
+    }
+
+    [Fact]
     public async Task UnicodeTextTemporarilyNeutralizesHeldPhysicalShift()
     {
         Win32.INPUT[]? sentInputs = null;
