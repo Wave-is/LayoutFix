@@ -4461,22 +4461,22 @@ internal static class Program
         try
         {
             if (!worker.Start()) return 31;
-            using var timeout = new CancellationTokenSource(
-                cases.Count == 1 ? TimeSpan.FromMinutes(3) : TimeSpan.FromMinutes(8));
-            await pipe.WaitForConnectionAsync(timeout.Token);
+            using var connectionTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+            await pipe.WaitForConnectionAsync(connectionTimeout.Token);
             using var reader = new StreamReader(pipe, leaveOpen: true);
             using var writer = new StreamWriter(pipe, leaveOpen: true) { AutoFlush = true };
             var firstFailure = 0;
             foreach (var qualityCase in cases)
             {
+                using var caseTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
                 var request = JsonSerializer.Serialize(new
                 {
                     Text = qualityCase.SourceText,
                     TargetLanguage = qualityCase.TargetLanguage,
                     SourceLanguage = qualityCase.SourceLanguage
                 });
-                await writer.WriteLineAsync(request.AsMemory(), timeout.Token);
-                var line = await reader.ReadLineAsync(timeout.Token);
+                await writer.WriteLineAsync(request.AsMemory(), caseTimeout.Token);
+                var line = await reader.ReadLineAsync(caseTimeout.Token);
                 if (line == null) return 32;
 
                 Console.WriteLine(
@@ -4550,8 +4550,11 @@ internal static class Program
                 $"result={(firstFailure == 0 ? "pass" : "fail")}");
             return firstFailure;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.Error.WriteLine(
+                $"worker-translation-matrix:model={model.Id} result=exception " +
+                $"type={ex.GetType().Name} message={JsonSerializer.Serialize(ex.Message)}");
             return 35;
         }
         finally
