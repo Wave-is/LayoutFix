@@ -2641,7 +2641,7 @@ internal static class Program
                 FailWritesRemaining = 1,
                 FailureMessage = privateSentinel
             };
-            var logger = new FileLoggerService(
+            using var logger = new FileLoggerService(
                 settings,
                 Path.Combine(testDirectory, "registry-diagnostic.log"));
             var coordinator = new SettingsPersistenceCoordinator(
@@ -2660,6 +2660,7 @@ internal static class Program
                 persistenceException = exception;
                 logger.LogError(exception.SafeLogMessage, exception);
             }
+            logger.Flush();
 
             if (persistenceException is not
                 {
