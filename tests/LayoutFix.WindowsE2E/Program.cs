@@ -777,14 +777,36 @@ internal static class Program
                             throw new InvalidOperationException(
                                 "The compatibility target could not be restored through the production transaction.");
                         }
-                        SendExternalSelectAll();
-                        await Task.Delay(100);
-                        var restoredTargetSelection = await textTransaction.CaptureAsync(
-                            allowPreviousWordFallback: false);
-                        if (!string.Equals(
-                            restoredTargetSelection?.Text.TrimEnd('\r', '\n'),
-                            "TEST",
-                            StringComparison.Ordinal))
+                        var restoredExactly = false;
+                        if (browserHost != null)
+                        {
+                            var restoreDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+                            while (DateTime.UtcNow < restoreDeadline)
+                            {
+                                if (browserHost.TryReadTargetText(out var restoredText) &&
+                                    string.Equals(
+                                        restoredText.TrimEnd('\r', '\n'),
+                                        "TEST",
+                                        StringComparison.Ordinal))
+                                {
+                                    restoredExactly = true;
+                                    break;
+                                }
+                                await Task.Delay(10);
+                            }
+                        }
+                        else
+                        {
+                            SendExternalSelectAll();
+                            await Task.Delay(100);
+                            var restoredTargetSelection = await textTransaction.CaptureAsync(
+                                allowPreviousWordFallback: false);
+                            restoredExactly = string.Equals(
+                                restoredTargetSelection?.Text.TrimEnd('\r', '\n'),
+                                "TEST",
+                                StringComparison.Ordinal);
+                        }
+                        if (!restoredExactly)
                         {
                             throw new InvalidOperationException(
                                 "The compatibility target TEST sentinel could not be restored exactly.");
