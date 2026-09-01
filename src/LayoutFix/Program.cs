@@ -294,6 +294,7 @@ internal static class Program
             var coordinator = services.GetRequiredService<IHotkeyCoordinator>();
             var settings = services.GetRequiredService<ISettingsService>();
             settings.Current.LoggingEnabled = true;
+            var lifecycleLogger = services.GetRequiredService<ILoggerService>();
             services.GetRequiredService<ILocalizationService>()
                 .SetCulture(settings.Current.UiLanguage);
 
@@ -350,6 +351,8 @@ internal static class Program
                     dictionaryWarmUp.IsCompletedSuccessfully &&
                     Application.MessageLoop)
                 {
+                    if (lifecycleLogger is FileLoggerService fileLogger)
+                        fileLogger.Flush();
                     var log = File.Exists(logFilePath)
                         ? File.ReadAllText(logFilePath)
                         : string.Empty;
