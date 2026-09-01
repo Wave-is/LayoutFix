@@ -29,12 +29,10 @@ public class HotkeyCoordinator : IHotkeyCoordinator
     private const int QueueCapacity = 64;
     private static readonly TimeSpan DefaultActionTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan BusyNotificationThrottle = TimeSpan.FromSeconds(2);
-    // A physical hotkey can arrive twice around the completion boundary: the
-    // second key-down is no longer covered by the in-flight guard when a fast
-    // UIA transaction finishes before the keyboard hook dispatches it. Keep a
-    // short post-completion debounce window so that one physical gesture cannot
-    // start a second transaction against the selection modified by the first.
-    private static readonly TimeSpan CompletedDuplicateGrace = TimeSpan.FromMilliseconds(250);
+    // A physical hotkey can arrive twice around the completion boundary. Measure
+    // the debounce window from the accepted key-down, not from action completion:
+    // a slow transaction must not make the next deliberate shortcut unresponsive.
+    private static readonly TimeSpan AcceptedDuplicateWindow = TimeSpan.FromMilliseconds(250);
     private readonly Channel<ActionRequest> _executionQueue;
     private readonly Task _queueProcessor;
     private readonly TimeSpan _actionTimeout;
@@ -46,8 +44,8 @@ public class HotkeyCoordinator : IHotkeyCoordinator
     // Keeping the action in the atomic state lets us collapse a quick duplicate
     // press without showing an error while still rejecting a conflicting action.
     private int _pendingHotkeyAction;
-    private int _lastCompletedHotkeyAction;
-    private long _lastCompletedHotkeyTimestamp;
+    private int _lastAcceptedHotkeyAction;
+    private long _lastAcceptedHotkeyTimestamp;
     private long _lastBusyNotificationTimestamp;
     private bool _disposed;
     private readonly IKeyboardHook _keyboardHook;
@@ -230,15 +228,17 @@ public class HotkeyCoordinator : IHotkeyCoordinator
                 return;
             }
 
-            if (IsRecentlyCompletedDuplicate(requestedState))
+            if (IsRecentlyAcceptedDuplicate(requestedState))
             {
                 Interlocked.CompareExchange(ref _pendingHotkeyAction, 0, requestedState);
                 _logger.LogInfo(
                     $"Action: {binding.Action}; Outcome: duplicate hotkey coalesced " +
-                    "because the same action recently completed.");
+                    "because the same physical gesture was already accepted.");
                 return;
             }
 
+            Volatile.Write(ref _lastAcceptedHotkeyAction, requestedState);
+            Volatile.Write(ref _lastAcceptedHotkeyTimestamp, Stopwatch.GetTimestamp());
             if (!_executionQueue.Writer.TryWrite(new ActionRequest(
                     binding.Action,
                     Completion: null,
@@ -254,14 +254,14 @@ public class HotkeyCoordinator : IHotkeyCoordinator
         }
     }
 
-    private bool IsRecentlyCompletedDuplicate(int requestedState)
+    private bool IsRecentlyAcceptedDuplicate(int requestedState)
     {
-        if (Volatile.Read(ref _lastCompletedHotkeyAction) != requestedState)
+        if (Volatile.Read(ref _lastAcceptedHotkeyAction) != requestedState)
             return false;
 
-        var completedAt = Volatile.Read(ref _lastCompletedHotkeyTimestamp);
-        return completedAt != 0 &&
-            Stopwatch.GetElapsedTime(completedAt) < CompletedDuplicateGrace;
+        var acceptedAt = Volatile.Read(ref _lastAcceptedHotkeyTimestamp);
+        return acceptedAt != 0 &&
+            Stopwatch.GetElapsedTime(acceptedAt) < AcceptedDuplicateWindow;
     }
 
     private void ReportBusyHotkey(HotkeyAction action)
@@ -399,12 +399,6 @@ public class HotkeyCoordinator : IHotkeyCoordinator
                     $"ElapsedMs={Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds:0}.");
                 if (request.IsHotkey)
                 {
-                    Volatile.Write(
-                        ref _lastCompletedHotkeyAction,
-                        (int)request.Action + 1);
-                    Volatile.Write(
-                        ref _lastCompletedHotkeyTimestamp,
-                        Stopwatch.GetTimestamp());
                     Volatile.Write(ref _pendingHotkeyAction, 0);
                 }
             }

@@ -510,7 +510,7 @@ public class UIAutomationTests
     }
 
     [Fact]
-    public async Task DuplicateImmediatelyAfterFastCompletion_IsCoalescedWithoutError()
+    public async Task DuplicateWithinAcceptedGestureWindow_IsCoalescedWithoutError()
     {
         var hook = new FakeKeyboardHook();
         var transaction = new BlockingThenRecordingTextTransactionService("ghbdtn");
@@ -544,13 +544,48 @@ public class UIAutomationTests
         Assert.Equal(1, transaction.CaptureCount);
         Assert.Contains(
             logger.Infos,
-            message => message.Contains("same action recently completed", StringComparison.Ordinal));
+            message => message.Contains("same physical gesture", StringComparison.Ordinal));
 
         // A separate deliberate action must be accepted after the physical
         // double-dispatch debounce window has elapsed.
         await Task.Delay(275);
         hook.Press(HotkeyCombo.Parse("Shift+Scroll"));
         await transaction.SecondCaptureStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(2, transaction.CaptureCount);
+    }
+
+    [Fact]
+    public async Task DeliberateHotkeyAfterSlowAction_IsNotSuppressedByCompletionWindow()
+    {
+        var hook = new FakeKeyboardHook();
+        var transaction = new BlockingThenRecordingTextTransactionService("ghbdtn");
+        using var coordinator = new HotkeyCoordinator(
+            hook,
+            transaction,
+            new FakeSettingsService(),
+            new FakeKeyboardLayoutManager(),
+            new LayoutConverter(),
+            new TextTransformer(),
+            new TransliterationService(),
+            new NumberToTextConverter(),
+            new RecordingLogger(),
+            new RecordingActiveWindowProvider(),
+            new NullSoundService(),
+            new FakeTranslationCoordinator(),
+            new NullTranslatorWindowProvider());
+        coordinator.Initialize();
+
+        hook.Press(HotkeyCombo.Parse("Shift+Scroll"));
+        await transaction.FirstCaptureStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await Task.Delay(275);
+        transaction.ReleaseFirstCapture();
+        await transaction.FirstActionCompleted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await Task.Delay(25);
+
+        var deliberate = hook.Press(HotkeyCombo.Parse("Shift+Scroll"));
+        await transaction.SecondCaptureStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.True(deliberate.Handled);
         Assert.Equal(2, transaction.CaptureCount);
     }
 

@@ -18,7 +18,7 @@ This release makes manual layout correction substantially more reliable in Chrom
 
 ## Verification
 
-- 570/570 automated tests passed: 198 Core, 215 Windows component and 157 integration tests.
+- 571/571 automated tests passed: 198 Core, 215 Windows component and 158 integration tests.
 - The isolated Edge/Chrome compatibility matrix passed 14/14 cases, covering `input`, `textarea`, `contenteditable`, caret fallback, held modifiers, duplicate hotkeys and sibling keyboard layouts.
 - Premiere Pro 2026 live tests passed `ghbdtn → привет`, `руддщ → hello`, ordinary `Scroll Lock` without a prior selection, New Project creation and repeated `Ctrl+S`; Premiere remained responsive.
 - Photoshop 2026 Save As passed ordinary `Scroll Lock` without a prior selection and completed a real PSD save; Photoshop remained responsive.
