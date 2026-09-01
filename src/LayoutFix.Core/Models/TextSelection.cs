@@ -7,4 +7,5 @@ public sealed record TextSelection(
     long? KeyboardInputGeneration = null,
     long? MouseInputGeneration = null,
     string? DirectAdapterId = null,
-    long? DiagnosticCaptureId = null);
+    long? DiagnosticCaptureId = null,
+    bool AllowTargetLayoutActivation = true);

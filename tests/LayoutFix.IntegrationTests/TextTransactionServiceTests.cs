@@ -61,7 +61,10 @@ public class TextTransactionServiceTests
         var input = new FakeInputInjector(clipboard);
         var windows = new FakeActiveWindowProvider();
         var adapter = new FakeDirectTextAdapter(
-            DirectTextCaptureResult.Captured("test-direct", "ghbdtn"));
+            DirectTextCaptureResult.Captured(
+                "test-direct",
+                "ghbdtn",
+                allowTargetLayoutActivation: false));
         var service = new TextTransactionService(
             input,
             clipboard,
@@ -75,6 +78,7 @@ public class TextTransactionServiceTests
         Assert.True(replaced);
         Assert.Equal("ghbdtn", selection!.Text);
         Assert.Equal("test-direct", selection.DirectAdapterId);
+        Assert.False(selection.AllowTargetLayoutActivation);
         Assert.Equal(1, adapter.CaptureCount);
         Assert.Equal(1, adapter.ReplaceCount);
         Assert.Equal("ghbdtn", adapter.ExpectedText);

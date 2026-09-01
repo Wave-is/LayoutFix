@@ -6,18 +6,23 @@ public readonly record struct DirectTextCaptureResult(
     bool IsApplicable,
     string? Text,
     string? AdapterId,
-    bool AllowSelectionFallback)
+    bool AllowSelectionFallback,
+    bool AllowTargetLayoutActivation)
 {
-    public static DirectTextCaptureResult NotApplicable => new(false, null, null, false);
+    public static DirectTextCaptureResult NotApplicable =>
+        new(false, null, null, false, false);
 
     public static DirectTextCaptureResult Rejected(string adapterId) =>
-        new(true, null, adapterId, false);
+        new(true, null, adapterId, false, false);
 
     public static DirectTextCaptureResult SelectionMissing(string adapterId) =>
-        new(true, null, adapterId, true);
+        new(true, null, adapterId, true, false);
 
-    public static DirectTextCaptureResult Captured(string adapterId, string text) =>
-        new(true, text, adapterId, false);
+    public static DirectTextCaptureResult Captured(
+        string adapterId,
+        string text,
+        bool allowTargetLayoutActivation = true) =>
+        new(true, text, adapterId, false, allowTargetLayoutActivation);
 }
 
 public interface IDirectTextAdapter

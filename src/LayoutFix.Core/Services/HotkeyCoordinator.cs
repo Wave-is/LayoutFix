@@ -29,7 +29,12 @@ public class HotkeyCoordinator : IHotkeyCoordinator
     private const int QueueCapacity = 64;
     private static readonly TimeSpan DefaultActionTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan BusyNotificationThrottle = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan CompletedDuplicateGrace = TimeSpan.FromMilliseconds(75);
+    // A physical hotkey can arrive twice around the completion boundary: the
+    // second key-down is no longer covered by the in-flight guard when a fast
+    // UIA transaction finishes before the keyboard hook dispatches it. Keep a
+    // short post-completion debounce window so that one physical gesture cannot
+    // start a second transaction against the selection modified by the first.
+    private static readonly TimeSpan CompletedDuplicateGrace = TimeSpan.FromMilliseconds(250);
     private readonly Channel<ActionRequest> _executionQueue;
     private readonly Task _queueProcessor;
     private readonly TimeSpan _actionTimeout;
@@ -552,7 +557,9 @@ public class HotkeyCoordinator : IHotkeyCoordinator
                     return;
                 }
 
-                if (replacementSucceeded && targetLayoutCode != null)
+                if (replacementSucceeded &&
+                    targetLayoutCode != null &&
+                    selection.AllowTargetLayoutActivation)
                 {
                     progress.Enter(ActionExecutionStage.LayoutActivation);
                     cancellationToken.ThrowIfCancellationRequested();
@@ -564,6 +571,13 @@ public class HotkeyCoordinator : IHotkeyCoordinator
                             "Stage: LayoutActivation; Outcome: target layout is unavailable.");
                     }
                     cancellationToken.ThrowIfCancellationRequested();
+                }
+                else if (replacementSucceeded &&
+                         targetLayoutCode != null &&
+                         !selection.AllowTargetLayoutActivation)
+                {
+                    _logger.LogInfo(
+                        "Target layout activation skipped by the direct adapter safety contract.");
                 }
 
                 if (replacementSucceeded && isAutoCorrectionUndo)

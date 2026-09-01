@@ -36,6 +36,35 @@ public class UIAutomationTests
     }
 
     [Fact]
+    public async Task FixLayout_DirectAdapterSafetyContract_SkipsTargetLayoutActivation()
+    {
+        var transaction = new RecordingTextTransactionService(
+            "ghbdtn",
+            allowTargetLayoutActivation: false);
+        var activeWindow = new RecordingActiveWindowProvider();
+        using var coordinator = new HotkeyCoordinator(
+            new FakeKeyboardHook(),
+            transaction,
+            new FakeSettingsService(),
+            new FakeKeyboardLayoutManager(),
+            new LayoutConverter(),
+            new TextTransformer(),
+            new TransliterationService(),
+            new NumberToTextConverter(),
+            new NullLogger(),
+            activeWindow,
+            new NullSoundService(),
+            new FakeTranslationCoordinator(),
+            new NullTranslatorWindowProvider());
+
+        await coordinator.ExecuteActionAsync(HotkeyAction.FixLayoutSelected);
+
+        Assert.Equal("привет", transaction.ReplacementText);
+        Assert.Equal(0, activeWindow.SwitchCount);
+        Assert.Null(activeWindow.SwitchedLayout);
+    }
+
+    [Fact]
     public async Task FixLayout_WithThreeLayouts_UsesUniqueDictionaryTarget()
     {
         var transaction = new RecordingTextTransactionService("ghbdtn");
@@ -517,7 +546,9 @@ public class UIAutomationTests
             logger.Infos,
             message => message.Contains("same action recently completed", StringComparison.Ordinal));
 
-        await Task.Delay(75);
+        // A separate deliberate action must be accepted after the physical
+        // double-dispatch debounce window has elapsed.
+        await Task.Delay(275);
         hook.Press(HotkeyCombo.Parse("Shift+Scroll"));
         await transaction.SecondCaptureStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Equal(2, transaction.CaptureCount);
@@ -610,7 +641,9 @@ public class UIAutomationTests
             new FakeTranslationCoordinator(),
             new NullTranslatorWindowProvider());
 
-    private sealed class RecordingTextTransactionService(string selectedText) : ITextTransactionService
+    private sealed class RecordingTextTransactionService(
+        string selectedText,
+        bool allowTargetLayoutActivation = true) : ITextTransactionService
     {
         private static readonly ActiveWindowContext Window = new((nint)1, (nint)2, 3);
         public string? ReplacementText { get; private set; }
@@ -620,7 +653,11 @@ public class UIAutomationTests
         public Task<TextSelection?> CaptureAsync(bool allowPreviousWordFallback, CancellationToken cancellationToken = default)
         {
             CaptureCount++;
-            return Task.FromResult<TextSelection?>(new TextSelection(selectedText, Window, false));
+            return Task.FromResult<TextSelection?>(new TextSelection(
+                selectedText,
+                Window,
+                false,
+                AllowTargetLayoutActivation: allowTargetLayoutActivation));
         }
 
         public Task<bool> ReplaceAsync(TextSelection selection, string replacement, CancellationToken cancellationToken = default)

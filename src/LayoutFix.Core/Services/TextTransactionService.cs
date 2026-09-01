@@ -156,7 +156,8 @@ public sealed class TextTransactionService : ITextTransactionService
                         captureInputGeneration.Keyboard,
                         captureInputGeneration.Mouse,
                         directCapture.AdapterId,
-                        captureId);
+                        captureId,
+                        directCapture.AllowTargetLayoutActivation);
                 }
             }
 

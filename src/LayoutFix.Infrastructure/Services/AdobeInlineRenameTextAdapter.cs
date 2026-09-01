@@ -186,7 +186,10 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
             }
 
             return nativeSelectedText.Length > 0
-                ? DirectTextCaptureResult.Captured(adapterId, nativeSelectedText)
+                ? DirectTextCaptureResult.Captured(
+                    adapterId,
+                    nativeSelectedText,
+                    allowTargetLayoutActivation: false)
                 : DirectTextCaptureResult.SelectionMissing(adapterId);
         }
 
