@@ -1233,14 +1233,22 @@ internal static class Program
                 process.BeginErrorReadLine();
 
                 var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
-                while (DateTime.UtcNow < deadline && !process.HasExited)
+                while (DateTime.UtcNow < deadline)
                 {
-                    process.Refresh();
-                    if (process.MainWindowHandle != IntPtr.Zero &&
-                        process.MainWindowTitle.Contains(
-                            titlePrefix,
-                            StringComparison.Ordinal))
+                    // Chromium may hand the launch request to a different
+                    // browser process even for a dedicated user-data-dir. In
+                    // that case Process.Start returns a short-lived broker and
+                    // waiting only on that PID fails before the isolated app
+                    // window has a chance to publish its fixture title.
+                    var windowProcess = TryFindBrowserWindowProcess(
+                        browserPath,
+                        titlePrefix);
+                    if (windowProcess != null)
                     {
+                        if (windowProcess.Id != process.Id)
+                            process.Dispose();
+                        process = windowProcess;
+
                         // MainWindowTitle is populated from the local document only
                         // after navigation commits. Give Chromium one additional
                         // rendering turn so the fixture's load/focus handler runs.
@@ -1295,6 +1303,48 @@ internal static class Program
                 _process.Dispose();
                 TryDeleteOwnedProfile(_profileDirectory, _ownedProfilePrefix);
             }
+        }
+
+        private static Process? TryFindBrowserWindowProcess(
+            string browserPath,
+            string titlePrefix)
+        {
+            var processName = Path.GetFileNameWithoutExtension(browserPath);
+            foreach (var candidate in Process.GetProcessesByName(processName))
+            {
+                try
+                {
+                    candidate.Refresh();
+                    if (candidate.HasExited ||
+                        candidate.MainWindowHandle == IntPtr.Zero ||
+                        !candidate.MainWindowTitle.Contains(
+                            titlePrefix,
+                            StringComparison.Ordinal))
+                    {
+                        candidate.Dispose();
+                        continue;
+                    }
+
+                    var candidatePath = candidate.MainModule?.FileName;
+                    if (!string.IsNullOrWhiteSpace(candidatePath) &&
+                        !string.Equals(
+                            Path.GetFullPath(candidatePath),
+                            Path.GetFullPath(browserPath),
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        candidate.Dispose();
+                        continue;
+                    }
+
+                    return candidate;
+                }
+                catch
+                {
+                    candidate.Dispose();
+                }
+            }
+
+            return null;
         }
 
         public bool TryReadTargetText(out string text)

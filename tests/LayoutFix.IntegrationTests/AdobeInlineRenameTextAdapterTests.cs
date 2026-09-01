@@ -11,6 +11,7 @@ public class AdobeInlineRenameTextAdapterTests
     [InlineData("afterfx", "AE_CApplication_25.3", "Edit", "after-effects-rename-paste-v2")]
     [InlineData("Adobe Premiere Pro", "Premiere Pro", "Edit", "premiere-rename-paste-v2")]
     [InlineData("Adobe Premiere Pro", "DroverLord - Window Class", "Edit", "premiere-rename-paste-v2")]
+    [InlineData("Adobe Premiere Pro", "#32770", "Edit", "premiere-rename-paste-v2")]
     [InlineData("Photoshop", "#32770", "Edit", "photoshop-save-dialog-v1")]
     [InlineData("photoshop", "#32770", "Edit", "photoshop-save-dialog-v1")]
     public void ResolveAdapterId_AcceptsOnlyProvenAdobeApplicationProfiles(

@@ -462,7 +462,8 @@ public sealed class AdobeInlineRenameTextAdapter : IDirectTextAdapter, IDisposab
                 "Adobe Premiere Pro",
                 StringComparison.OrdinalIgnoreCase) &&
             (string.Equals(mainClass, "Premiere Pro", StringComparison.Ordinal) ||
-             string.Equals(mainClass, "DroverLord - Window Class", StringComparison.Ordinal)))
+             string.Equals(mainClass, "DroverLord - Window Class", StringComparison.Ordinal) ||
+             string.Equals(mainClass, "#32770", StringComparison.Ordinal)))
         {
             return PremiereAdapterId;
         }
