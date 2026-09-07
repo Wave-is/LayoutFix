@@ -224,6 +224,21 @@ public sealed class TextTransactionService : ITextTransactionService
                         ? await _targetGuard.TryReadSelectedTextAsync(window, cancellationToken)
                         : TextSelectionReadResult.Unsupported;
                     selectedText = selectionRead.Text;
+
+                    // Some Chromium web components advertise a working TextPattern
+                    // but keep returning an empty selection after Ctrl+Shift+Left.
+                    // The target has already passed the safety check, so fall back to
+                    // an isolated clipboard copy instead of treating that stale UIA
+                    // result as proof that no word was selected.
+                    if (selectionRead.IsSupported && string.IsNullOrEmpty(selectedText))
+                    {
+                        LogSupportDiagnostic(
+                            captureId,
+                            "capture",
+                            "observed",
+                            "accessibility-fallback-selection-empty");
+                        selectionRead = TextSelectionReadResult.Unsupported;
+                    }
                 }
             }
 
@@ -432,7 +447,9 @@ public sealed class TextTransactionService : ITextTransactionService
                 return false;
             }
             string? currentSelection;
-            if (selectionRead.IsSupported)
+            var verifyWithClipboard = !selectionRead.IsSupported ||
+                selection.WasSelectedByFallback && string.IsNullOrEmpty(selectionRead.Text);
+            if (!verifyWithClipboard)
             {
                 currentSelection = selectionRead.Text;
                 _logger.LogInfo(
@@ -440,6 +457,14 @@ public sealed class TextTransactionService : ITextTransactionService
             }
             else
             {
+                if (selectionRead.IsSupported)
+                {
+                    LogSupportDiagnostic(
+                        captureId,
+                        "replacement",
+                        "observed",
+                        "accessibility-fallback-selection-empty");
+                }
                 using var snapshot = await _clipboard.CaptureAsync(cancellationToken);
                 _logger.LogInfo("Clipboard snapshot captured for replacement verification.");
                 try

@@ -187,6 +187,33 @@ public class TextTransactionServiceTests
     }
 
     [Fact]
+    public async Task AccessibilityFallback_UsesClipboardWhenSelectionTextRemainsEmpty()
+    {
+        var clipboard = new FakeClipboardService("user clipboard payload");
+        var input = new FakeInputInjector(clipboard, "ghbdtn", "ghbdtn");
+        var guard = new SelectedTextTargetGuard(null, null, null);
+        var service = new TextTransactionService(
+            input,
+            clipboard,
+            new FakeActiveWindowProvider(),
+            new NullLogger(),
+            guard);
+
+        var selection = await service.CaptureAsync(allowPreviousWordFallback: true);
+        var replaced = await service.ReplaceAsync(selection!, "привет");
+
+        Assert.True(replaced);
+        Assert.Equal("ghbdtn", selection!.Text);
+        Assert.True(selection.WasSelectedByFallback);
+        Assert.Equal(1, input.SelectWordCount);
+        Assert.Equal(2, input.CopyCount);
+        Assert.Equal(2, clipboard.CaptureCount);
+        Assert.Equal(2, clipboard.RestoreCount);
+        Assert.Equal("привет", input.SentText);
+        Assert.Equal("user clipboard payload", clipboard.Value);
+    }
+
+    [Fact]
     public async Task ApplicableDirectAdapter_UsesPreviousWordFallbackWithoutClipboard()
     {
         var clipboard = new FakeClipboardService("complex user clipboard payload");
