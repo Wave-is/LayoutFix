@@ -74,7 +74,15 @@ internal static class Program
             return RunSettingsSnapshot(
                 args[1],
                 args.Length >= 3 ? args[2] : "Dictionary",
-                args.Length >= 4 ? args[3] : null);
+                args.Length >= 4 ? args[3] : null,
+                args.Length >= 5 &&
+                float.TryParse(
+                    args[4],
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out var snapshotScale)
+                    ? snapshotScale
+                    : 1F);
         if (args.Length >= 1 && args[0] == "--settings-preview")
             return RunSettingsPreview(args.Length >= 2 ? args[1] : "ru");
         if (args.Length >= 2 && args[0] == "--tray-icon-snapshot")
@@ -3605,7 +3613,11 @@ internal static class Program
         }
     }
 
-    private static int RunSettingsSnapshot(string outputPath, string tabName, string? culture)
+    private static int RunSettingsSnapshot(
+        string outputPath,
+        string tabName,
+        string? culture,
+        float manualScale)
     {
         var testDirectory = Path.Combine(Path.GetTempPath(), $"LayoutFix.SettingsSnapshot.{Guid.NewGuid():N}");
         Directory.CreateDirectory(testDirectory);
@@ -3654,6 +3666,8 @@ internal static class Program
             modelDownloadService,
             historyService,
             new InMemoryTranslationCredentialStore());
+        if (manualScale is > 1F and <= 3F)
+            form.Scale(new SizeF(manualScale, manualScale));
         var result = 1;
         form.Shown += async (_, _) =>
         {
@@ -3756,6 +3770,37 @@ internal static class Program
                             throw new InvalidOperationException(
                                 $"General setting '{expectedLabel}' overlaps its toggle.");
                         }
+                    }
+
+                    var logDirectoryLabel = localization.GetString(
+                        "Settings_LogDirectory",
+                        "Log folder (local, mapped drive, or network share)");
+                    var logDirectoryRow = Descendants(form)
+                        .OfType<Control>()
+                        .SingleOrDefault(control =>
+                            control.Visible &&
+                            control.AccessibleName == "General.LogDirectory");
+                    if (logDirectoryRow == null ||
+                        !Descendants(logDirectoryRow).OfType<Label>().Any(label =>
+                            label.Text.Equals(logDirectoryLabel, StringComparison.Ordinal)) ||
+                        Descendants(logDirectoryRow).OfType<TextBox>().Count() != 1 ||
+                        Descendants(logDirectoryRow).OfType<Button>().Count() != 3)
+                    {
+                        throw new InvalidOperationException(
+                            "The configurable diagnostic log directory controls are incomplete.");
+                    }
+
+                    var logDirectoryControls = Descendants(logDirectoryRow)
+                        .Where(control => control.Visible && control is TextBox or Button)
+                        .Select(control => control.RectangleToScreen(control.ClientRectangle))
+                        .OrderBy(bounds => bounds.Left)
+                        .ToArray();
+                    if (logDirectoryControls.Zip(
+                            logDirectoryControls.Skip(1),
+                            (first, second) => first.Right > second.Left).Any(overlap => overlap))
+                    {
+                        throw new InvalidOperationException(
+                            "The configurable diagnostic log directory controls overlap.");
                     }
 
                     var themeLabel = localization.GetString("Settings_Theme", "Color theme");

@@ -32,6 +32,13 @@ public class LocalizationServiceTests
         Assert.NotEqual("missing", service.GetString("Settings_DiagnosticsCopied", "missing"));
         Assert.NotEqual("missing", service.GetString("Settings_DiagnosticsCopyError", "missing"));
         Assert.NotEqual("missing", service.GetString("Settings_Logging", "missing"));
+        Assert.NotEqual("missing", service.GetString("Settings_LogDirectory", "missing"));
+        Assert.NotEqual("missing", service.GetString("Settings_Browse", "missing"));
+        Assert.NotEqual("missing", service.GetString("Settings_Save", "missing"));
+        Assert.NotEqual("missing", service.GetString("Settings_Default", "missing"));
+        Assert.NotEqual("missing", service.GetString("Settings_LogDirectoryInvalidTitle", "missing"));
+        Assert.NotEqual("missing", service.GetString("Settings_LogDirectoryInvalidMessage", "missing"));
+        Assert.NotEqual("missing", service.GetString("Settings_LogDirectoryBrowseTitle", "missing"));
         Assert.NotEqual("missing", service.GetString("Settings_Theme", "missing"));
         Assert.NotEqual("missing", service.GetString("Settings_ThemeAuto", "missing"));
         Assert.NotEqual("missing", service.GetString("Settings_ThemeLight", "missing"));

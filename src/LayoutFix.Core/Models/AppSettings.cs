@@ -4,7 +4,7 @@ namespace LayoutFix.Core.Models;
 
 public class AppSettings
 {
-    public const int CurrentVersion = 11;
+    public const int CurrentVersion = 12;
     public static IReadOnlyList<string> DefaultAutoConversionBlacklistedProcesses { get; } =
     [
         "devenv.exe", "Code.exe", "Code - Insiders.exe", "VSCodium.exe",
@@ -75,6 +75,9 @@ public class AppSettings
     // until the current application and text target can be proven safe.
     public bool AutoConversionEnabled { get; set; } = false;
     public bool LoggingEnabled { get; set; } = false;
+    // Empty keeps the private per-user LocalAppData destination. An explicit
+    // absolute directory may point to a local drive, mapped drive, or UNC share.
+    public string DiagnosticLogDirectory { get; set; } = string.Empty;
     public bool UseOfflineTranslation { get; set; } = false;
     public bool OnlineTranslationEnabled { get; set; } = false;
     public bool TranslationHistoryEnabled { get; set; } = false;

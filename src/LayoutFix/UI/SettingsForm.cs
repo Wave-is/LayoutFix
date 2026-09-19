@@ -450,6 +450,7 @@ public class SettingsForm : Form
             _currentSettings.LoggingEnabled,
             v => { _currentSettings.LoggingEnabled = v; SaveSettings(); },
             "General.Logging"));
+        AddStackRow(stack, CreateLogDirectorySetting(), 8);
 
         var cmbTheme = new ComboBox
         {
@@ -615,6 +616,152 @@ public class SettingsForm : Form
         };
         sw.CheckedChanged += (s, e) => onChanged(sw.Checked);
         return CreateControlSettingRow(title, sw, accessibleName);
+    }
+
+    private TableLayoutPanel CreateLogDirectorySetting()
+    {
+        var row = new TableLayoutPanel
+        {
+            Height = 78,
+            MinimumSize = new Size(0, 78),
+            ColumnCount = 1,
+            RowCount = 2,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            BackColor = _bgColor,
+            AccessibleName = "General.LogDirectory"
+        };
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        row.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+        row.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+
+        var label = new Label
+        {
+            Text = _locService.GetString(
+                "Settings_LogDirectory",
+                "Log folder (local, mapped drive, or network share)"),
+            ForeColor = _textColor,
+            Font = new Font("Segoe UI", 11F),
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = Padding.Empty
+        };
+
+        var editor = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 4,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            BackColor = _bgColor
+        };
+        editor.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        editor.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+        editor.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+        editor.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
+        editor.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+
+        var txtDirectory = new TextBox
+        {
+            Text = _currentSettings.DiagnosticLogDirectory,
+            PlaceholderText = DiagnosticLogPath.DefaultDirectory,
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0, 4, 8, 4),
+            BackColor = _sidebarColor,
+            ForeColor = _textColor,
+            BorderStyle = BorderStyle.FixedSingle,
+            AccessibleName = "General.LogDirectory.Path"
+        };
+        var btnBrowse = CreateLogDirectoryButton(
+            _locService.GetString("Settings_Browse", "Browse..."),
+            "General.LogDirectory.Browse");
+        var btnSave = CreateLogDirectoryButton(
+            _locService.GetString("Settings_Save", "Save"),
+            "General.LogDirectory.Save");
+        var btnDefault = CreateLogDirectoryButton(
+            _locService.GetString("Settings_Default", "Default"),
+            "General.LogDirectory.Default");
+
+        void ApplyDirectory()
+        {
+            if (!DiagnosticLogPath.TryNormalizeDirectory(
+                    txtDirectory.Text,
+                    out var normalizedDirectory))
+            {
+                MessageBox.Show(
+                    this,
+                    _locService.GetString(
+                        "Settings_LogDirectoryInvalidMessage",
+                        "Enter an absolute local, mapped-drive, or UNC folder path."),
+                    _locService.GetString(
+                        "Settings_LogDirectoryInvalidTitle",
+                        "Invalid log folder"),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                txtDirectory.Focus();
+                return;
+            }
+
+            txtDirectory.Text = normalizedDirectory;
+            _currentSettings.DiagnosticLogDirectory = normalizedDirectory;
+            SaveSettings();
+        }
+
+        btnBrowse.Click += (_, _) =>
+        {
+            using var dialog = new FolderBrowserDialog
+            {
+                Description = _locService.GetString(
+                    "Settings_LogDirectoryBrowseTitle",
+                    "Select a folder for LayoutFix diagnostic logs"),
+                UseDescriptionForTitle = true,
+                ShowNewFolderButton = true
+            };
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            txtDirectory.Text = dialog.SelectedPath;
+            ApplyDirectory();
+        };
+        btnSave.Click += (_, _) => ApplyDirectory();
+        btnDefault.Click += (_, _) =>
+        {
+            txtDirectory.Clear();
+            ApplyDirectory();
+        };
+        txtDirectory.KeyDown += (_, eventArgs) =>
+        {
+            if (eventArgs.KeyCode != Keys.Enter)
+                return;
+            eventArgs.SuppressKeyPress = true;
+            ApplyDirectory();
+        };
+
+        editor.Controls.Add(txtDirectory, 0, 0);
+        editor.Controls.Add(btnBrowse, 1, 0);
+        editor.Controls.Add(btnSave, 2, 0);
+        editor.Controls.Add(btnDefault, 3, 0);
+        row.Controls.Add(label, 0, 0);
+        row.Controls.Add(editor, 0, 1);
+        return row;
+    }
+
+    private Button CreateLogDirectoryButton(string text, string accessibleName)
+    {
+        var button = new Button
+        {
+            Text = text,
+            Dock = DockStyle.Fill,
+            Margin = new Padding(4),
+            BackColor = _accentColor,
+            ForeColor = Color.White,
+            FlatStyle = FlatStyle.Flat,
+            AccessibleName = accessibleName,
+            AutoEllipsis = true
+        };
+        button.FlatAppearance.BorderSize = 0;
+        return button;
     }
 
     private void BuildLanguagesTab()

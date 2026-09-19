@@ -17,6 +17,8 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
     private const int ProbeTimeoutMilliseconds = 800;
     private const int ChromiumProbeTimeoutMilliseconds = 2_500;
     private const int SelectionProbeTimeoutMilliseconds = 300;
+    private const int ChromiumFocusProbeAttempts = 4;
+    private const int ChromiumFocusProbeRetryDelayMilliseconds = 40;
     private static readonly TimeSpan BusyWarningThrottle = TimeSpan.FromSeconds(2);
     private readonly IActiveWindowProvider _activeWindow;
     private readonly ILoggerService _logger;
@@ -26,6 +28,7 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
     private readonly Func<nint, bool?> _nativeProbe;
     private readonly Func<uint, TargetInputAccess> _integrityProbe;
     private readonly Func<ActiveWindowContext, bool> _compatibilityFallbackProbe;
+    private readonly Func<ActiveWindowContext, bool> _focusRetryCandidate;
     private readonly ISettingsService? _settingsService;
     private long _lastBusyWarningTimestamp;
     private long _lastHigherIntegrityWarningTimestamp;
@@ -92,7 +95,8 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
         Func<nint, bool?> nativeProbe,
         Func<uint, TargetInputAccess> integrityProbe,
         ISettingsService? settingsService = null,
-        Func<ActiveWindowContext, bool>? compatibilityFallbackProbe = null)
+        Func<ActiveWindowContext, bool>? compatibilityFallbackProbe = null,
+        Func<ActiveWindowContext, bool>? focusRetryCandidate = null)
     {
         _activeWindow = activeWindow;
         _logger = logger;
@@ -101,6 +105,7 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
         _integrityProbe = integrityProbe;
         _settingsService = settingsService;
         _compatibilityFallbackProbe = compatibilityFallbackProbe ?? ProbeChromiumRootPane;
+        _focusRetryCandidate = focusRetryCandidate ?? IsChromiumTopLevelWindow;
     }
 
     public async Task<bool> CanModifyAsync(
@@ -175,10 +180,13 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
                 return accepted;
             }
 
-            var probeTimeoutMilliseconds = IsChromiumTopLevelWindow(context)
+            var retryTransientFocus = _focusRetryCandidate(context);
+            var probeTimeoutMilliseconds = retryTransientFocus
                 ? ChromiumProbeTimeoutMilliseconds
                 : ProbeTimeoutMilliseconds;
-            var probeTask = Task.Run(() => _probe(context), CancellationToken.None);
+            var probeTask = Task.Run(
+                () => ProbeTargetWithBoundedFocusRetry(context, retryTransientFocus),
+                CancellationToken.None);
             var completed = await Task.WhenAny(
                 probeTask,
                 Task.Delay(
@@ -201,21 +209,22 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
                 return false;
             }
 
-            var editable = await probeTask;
+            var probeResult = await probeTask;
+            var editable = probeResult.Editable;
             var focusMatches = _activeWindow.IsSameActiveWindow(context);
-            var compatibilityFallback = !editable &&
-                focusMatches &&
-                _compatibilityFallbackProbe(context);
+            var compatibilityFallback = probeResult.CompatibilityFallback && focusMatches;
             var result = (editable || compatibilityFallback) && focusMatches;
             LogSupportDiagnostic(
                 result ? "accepted" : "rejected",
                 editable
-                    ? "uia-focus-recheck"
+                    ? probeResult.Attempts > 1
+                        ? "uia-focus-retry"
+                        : "uia-focus-recheck"
                     : compatibilityFallback
                         ? "chromium-root-pane-fallback"
                         : "uia-target-not-editable",
                 $"Probe={(compatibilityFallback ? "chromium-fallback" : "uia")}; " +
-                $"SameWindow={focusMatches}");
+                $"FocusAttempts={probeResult.Attempts}; SameWindow={focusMatches}");
             return result;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -233,6 +242,38 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
                 _probeGate.Release();
         }
     }
+
+    private TargetProbeResult ProbeTargetWithBoundedFocusRetry(
+        ActiveWindowContext context,
+        bool retryTransientFocus)
+    {
+        var maximumAttempts = retryTransientFocus ? ChromiumFocusProbeAttempts : 1;
+        for (var attempt = 1; attempt <= maximumAttempts; attempt++)
+        {
+            if (_probe(context))
+                return new TargetProbeResult(Editable: true, CompatibilityFallback: false, attempt);
+
+            // Preserve the narrow, existing Chromium root-pane compatibility
+            // path without delaying it. Other transient Chromium/Electron panes
+            // remain rejected and get a few milliseconds to settle on the real
+            // writable control before the operation fails closed.
+            if (_compatibilityFallbackProbe(context))
+                return new TargetProbeResult(Editable: false, CompatibilityFallback: true, attempt);
+
+            if (attempt < maximumAttempts)
+                Thread.Sleep(ChromiumFocusProbeRetryDelayMilliseconds);
+        }
+
+        return new TargetProbeResult(
+            Editable: false,
+            CompatibilityFallback: false,
+            maximumAttempts);
+    }
+
+    private readonly record struct TargetProbeResult(
+        bool Editable,
+        bool CompatibilityFallback,
+        int Attempts);
 
     public async Task<TextSelectionAvailability> GetSelectionAvailabilityAsync(
         ActiveWindowContext context,
@@ -390,7 +431,7 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
         }
     }
 
-    private void CompleteTimedOutProbe(Task<bool> probeTask)
+    private void CompleteTimedOutProbe(Task<TargetProbeResult> probeTask)
     {
         try
         {

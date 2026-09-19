@@ -111,6 +111,68 @@ public class WindowsTextTargetGuardTests
     }
 
     [Fact]
+    public async Task ChromiumTransientFocus_RetriesUntilEditableTargetAppears()
+    {
+        var primaryProbeCalls = 0;
+        using var guard = new WindowsTextTargetGuard(
+            new FakeActiveWindowProvider(),
+            new NullLogger(),
+            _ => Interlocked.Increment(ref primaryProbeCalls) == 3,
+            _ => null,
+            _ => TargetInputAccess.Allowed,
+            settingsService: null,
+            compatibilityFallbackProbe: _ => false,
+            focusRetryCandidate: _ => true);
+
+        Assert.True(await guard.CanModifyAsync(Context));
+        Assert.Equal(3, primaryProbeCalls);
+    }
+
+    [Fact]
+    public async Task ChromiumTransientFocus_NeverAcceptsUneditablePaneAfterRetryBudget()
+    {
+        var primaryProbeCalls = 0;
+        using var guard = new WindowsTextTargetGuard(
+            new FakeActiveWindowProvider(),
+            new NullLogger(),
+            _ =>
+            {
+                Interlocked.Increment(ref primaryProbeCalls);
+                return false;
+            },
+            _ => null,
+            _ => TargetInputAccess.Allowed,
+            settingsService: null,
+            compatibilityFallbackProbe: _ => false,
+            focusRetryCandidate: _ => true);
+
+        Assert.False(await guard.CanModifyAsync(Context));
+        Assert.Equal(4, primaryProbeCalls);
+    }
+
+    [Fact]
+    public async Task NonChromiumTarget_DoesNotPayFocusRetryDelay()
+    {
+        var primaryProbeCalls = 0;
+        using var guard = new WindowsTextTargetGuard(
+            new FakeActiveWindowProvider(),
+            new NullLogger(),
+            _ =>
+            {
+                Interlocked.Increment(ref primaryProbeCalls);
+                return false;
+            },
+            _ => null,
+            _ => TargetInputAccess.Allowed,
+            settingsService: null,
+            compatibilityFallbackProbe: _ => false,
+            focusRetryCandidate: _ => false);
+
+        Assert.False(await guard.CanModifyAsync(Context));
+        Assert.Equal(1, primaryProbeCalls);
+    }
+
+    [Fact]
     public async Task DeniesSecureTarget()
     {
         var windows = new FakeActiveWindowProvider();

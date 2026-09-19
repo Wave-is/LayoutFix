@@ -65,6 +65,10 @@ public static class DiagnosticsReportBuilder
         Append(report, "TranslationHistoryEnabled", settings.TranslationHistoryEnabled.ToString(CultureInfo.InvariantCulture));
         Append(report, "DiagnosticNotificationsEnabled", settings.NotificationsEnabled.ToString(CultureInfo.InvariantCulture));
         Append(report, "LoggingEnabled", settings.LoggingEnabled.ToString(CultureInfo.InvariantCulture));
+        Append(
+            report,
+            "LogDestination",
+            string.IsNullOrWhiteSpace(settings.DiagnosticLogDirectory) ? "private-local" : "custom");
         return report.ToString();
     }
 

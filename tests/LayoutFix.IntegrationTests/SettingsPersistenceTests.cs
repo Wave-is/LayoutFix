@@ -26,6 +26,7 @@ public sealed class SettingsPersistenceTests : IDisposable
         service.Current.AutoConversionEnabled = true;
         service.Current.NotificationsEnabled = false;
         service.Current.LoggingEnabled = true;
+        service.Current.DiagnosticLogDirectory = @"\\diagnostics\layoutfix\WavePC";
         service.Save(service.Current);
 
         var reloaded = new SettingsService(settingsPath);
@@ -34,6 +35,9 @@ public sealed class SettingsPersistenceTests : IDisposable
         Assert.True(reloaded.Current.AutoConversionEnabled);
         Assert.False(reloaded.Current.NotificationsEnabled);
         Assert.True(reloaded.Current.LoggingEnabled);
+        Assert.Equal(
+            @"\\diagnostics\layoutfix\WavePC",
+            reloaded.Current.DiagnosticLogDirectory);
         Assert.Equal(AppSettings.CurrentVersion, reloaded.Current.Version);
         Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(settingsPath)!, "*.tmp"));
     }

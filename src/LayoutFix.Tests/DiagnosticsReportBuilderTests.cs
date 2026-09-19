@@ -56,6 +56,7 @@ public class DiagnosticsReportBuilderTests
         Assert.Contains("OfflineModel=pro", report);
         Assert.Contains("DiagnosticNotificationsEnabled=False", report);
         Assert.Contains("LoggingEnabled=True", report);
+        Assert.Contains("LogDestination=private-local", report);
     }
 
     [Fact]

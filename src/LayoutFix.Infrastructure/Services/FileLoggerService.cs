@@ -15,11 +15,15 @@ public class FileLoggerService : ILoggerService, IDisposable
         @"(?<![\p{L}\p{N}_])(?:[A-Za-z]:[\\/]|\\\\)[^""'\r\n)\]}|]*",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private readonly ISettingsService? _settingsService;
-    private readonly string _logFilePath;
-    private readonly Mutex? _crossProcessMutex;
+    private readonly string? _fixedLogFilePath;
+    private readonly string _defaultLogFilePath;
     private readonly Channel<LogCommand> _queue;
     private readonly Task _writerTask;
-    private bool _initialized;
+    private Task<bool>? _pendingDestinationWrite;
+    private string? _pendingDestinationPath;
+    private string? _retryDestinationPath;
+    private string? _fallbackNoticeDestinationPath;
+    private DateTime _customRetryAfterUtc;
     private int _acceptingWrites = 1;
 
     public FileLoggerService() : this(null, null)
@@ -31,27 +35,20 @@ public class FileLoggerService : ILoggerService, IDisposable
     }
 
     public FileLoggerService(ISettingsService? settingsService, string? logFilePath)
+        : this(settingsService, logFilePath, DiagnosticLogPath.DefaultFilePath)
+    {
+    }
+
+    internal FileLoggerService(
+        ISettingsService? settingsService,
+        string? logFilePath,
+        string defaultLogFilePath)
     {
         _settingsService = settingsService;
-        _logFilePath = Path.GetFullPath(logFilePath ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "LayoutFix",
-            "Logs",
-            "layoutfix.log"));
-        try
-        {
-            var pathHash = Convert.ToHexString(SHA256.HashData(
-                Encoding.UTF8.GetBytes(_logFilePath.ToUpperInvariant())));
-            _crossProcessMutex = new Mutex(
-                initiallyOwned: false,
-                $"Local\\LayoutFix.Log.{pathHash}");
-        }
-        catch
-        {
-            // Logging must never prevent application startup. The single-reader
-            // queue still serializes writes from this process when the shared
-            // kernel mutex is unavailable.
-        }
+        _fixedLogFilePath = string.IsNullOrWhiteSpace(logFilePath)
+            ? null
+            : Path.GetFullPath(logFilePath);
+        _defaultLogFilePath = Path.GetFullPath(defaultLogFilePath);
 
         _queue = Channel.CreateUnbounded<LogCommand>(new UnboundedChannelOptions
         {
@@ -148,52 +145,219 @@ public class FileLoggerService : ILoggerService, IDisposable
 
     private void WriteBatch(string entries)
     {
-        try
+        var destinationPath = ResolveDestinationPath();
+        if (_fixedLogFilePath != null ||
+            string.Equals(
+                destinationPath,
+                _defaultLogFilePath,
+                StringComparison.OrdinalIgnoreCase))
         {
-            var ownsMutex = false;
-            try
-            {
-                if (_crossProcessMutex is not null)
-                {
-                    try
-                    {
-                        ownsMutex = _crossProcessMutex.WaitOne(TimeSpan.FromSeconds(2));
-                    }
-                    catch (AbandonedMutexException)
-                    {
-                        ownsMutex = true;
-                    }
+            TryWriteFile(destinationPath, entries);
+            return;
+        }
 
-                    if (!ownsMutex)
-                        return;
+        AbandonPendingDestinationIfChanged(destinationPath);
+        CompletePendingDestinationWrite();
+        if (_pendingDestinationWrite == null && CanRetryCustomDestination(destinationPath))
+        {
+            var destinationWrite = Task.Run(() => TryWriteFile(destinationPath, entries));
+            if (destinationWrite.Wait(TimeSpan.FromSeconds(2)))
+            {
+                if (GetWriteResult(destinationWrite))
+                {
+                    ResetDestinationFailure(destinationPath);
+                    return;
                 }
 
-                EnsureLogFileReady(Encoding.UTF8.GetByteCount(entries));
-                File.AppendAllText(_logFilePath, entries);
+                DelayDestinationRetry(destinationPath);
             }
-            finally
+            else
             {
-                if (ownsMutex)
-                    _crossProcessMutex!.ReleaseMutex();
+                // Network filesystem calls do not provide reliable cancellation.
+                // Keep at most one unresolved write and send later batches to the
+                // private local fallback so diagnostics never block a hotkey or
+                // application shutdown.
+                _pendingDestinationWrite = destinationWrite;
+                _pendingDestinationPath = destinationPath;
             }
+        }
+
+        TryWriteFile(
+            _defaultLogFilePath,
+            AddFallbackNotice(destinationPath, entries));
+    }
+
+    private string ResolveDestinationPath()
+    {
+        if (_fixedLogFilePath != null)
+            return _fixedLogFilePath;
+
+        try
+        {
+            return _settingsService == null
+                ? _defaultLogFilePath
+                : ResolveSettingsDestination(_settingsService.Current);
         }
         catch
         {
-            // Ignore logging errors to prevent crash.
+            return _defaultLogFilePath;
         }
     }
 
-    private void EnsureLogFileReady(int pendingByteCount)
+    private string ResolveSettingsDestination(LayoutFix.Core.Models.AppSettings settings) =>
+        DiagnosticLogPath.TryNormalizeDirectory(
+            settings.DiagnosticLogDirectory,
+            out var directory) &&
+        !string.IsNullOrEmpty(directory)
+            ? Path.Combine(directory, DiagnosticLogPath.FileName)
+            : _defaultLogFilePath;
+
+    private void CompletePendingDestinationWrite()
     {
-        if (!_initialized)
+        if (_pendingDestinationWrite?.IsCompleted != true)
+            return;
+
+        var completedPath = _pendingDestinationPath;
+        if (GetWriteResult(_pendingDestinationWrite) && completedPath != null)
+            ResetDestinationFailure(completedPath);
+        else if (completedPath != null)
+            DelayDestinationRetry(completedPath);
+
+        _pendingDestinationWrite = null;
+        _pendingDestinationPath = null;
+    }
+
+    private void AbandonPendingDestinationIfChanged(string destinationPath)
+    {
+        if (_pendingDestinationWrite == null ||
+            _pendingDestinationWrite.IsCompleted ||
+            string.Equals(
+                _pendingDestinationPath,
+                destinationPath,
+                StringComparison.OrdinalIgnoreCase))
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_logFilePath)!);
-            _initialized = true;
+            return;
         }
 
-        if (File.Exists(_logFilePath) &&
-            new FileInfo(_logFilePath).Length + pendingByteCount > MaxLogFileBytes)
-            File.Move(_logFilePath, _logFilePath + ".bak", true);
+        // A permanently stalled network share must not pin logging to the local
+        // fallback after the user selects a different destination. The old task
+        // owns only immutable path/entry data and can safely finish on its own.
+        _pendingDestinationWrite = null;
+        _pendingDestinationPath = null;
+    }
+
+    private bool CanRetryCustomDestination(string destinationPath) =>
+        !string.Equals(_retryDestinationPath, destinationPath, StringComparison.OrdinalIgnoreCase) ||
+        DateTime.UtcNow >= _customRetryAfterUtc;
+
+    private void DelayDestinationRetry(string destinationPath)
+    {
+        _retryDestinationPath = destinationPath;
+        _customRetryAfterUtc = DateTime.UtcNow.AddSeconds(30);
+    }
+
+    private void ResetDestinationFailure(string destinationPath)
+    {
+        if (string.Equals(
+                _retryDestinationPath,
+                destinationPath,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            _retryDestinationPath = null;
+            _customRetryAfterUtc = default;
+        }
+
+        if (string.Equals(
+                _fallbackNoticeDestinationPath,
+                destinationPath,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            _fallbackNoticeDestinationPath = null;
+        }
+    }
+
+    private string AddFallbackNotice(string destinationPath, string entries)
+    {
+        if (string.Equals(
+                _fallbackNoticeDestinationPath,
+                destinationPath,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return entries;
+        }
+
+        _fallbackNoticeDestinationPath = destinationPath;
+        return $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [WARN] " +
+               "Configured diagnostic log directory is unavailable; using private local fallback." +
+               Environment.NewLine + entries;
+    }
+
+    private static bool GetWriteResult(Task<bool> writeTask)
+    {
+        try
+        {
+            return writeTask.GetAwaiter().GetResult();
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryWriteFile(string logFilePath, string entries)
+    {
+        Mutex? crossProcessMutex = null;
+        var ownsMutex = false;
+        try
+        {
+            try
+            {
+                var pathHash = Convert.ToHexString(SHA256.HashData(
+                    Encoding.UTF8.GetBytes(logFilePath.ToUpperInvariant())));
+                crossProcessMutex = new Mutex(
+                    initiallyOwned: false,
+                    $"Local\\LayoutFix.Log.{pathHash}");
+                try
+                {
+                    ownsMutex = crossProcessMutex.WaitOne(TimeSpan.FromSeconds(2));
+                }
+                catch (AbandonedMutexException)
+                {
+                    ownsMutex = true;
+                }
+
+                if (!ownsMutex)
+                    return false;
+            }
+            catch
+            {
+                // The process-local single-reader queue still serializes writes
+                // if the shared kernel mutex cannot be created.
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(logFilePath)!);
+            var pendingByteCount = Encoding.UTF8.GetByteCount(entries);
+            if (File.Exists(logFilePath) &&
+                new FileInfo(logFilePath).Length + pendingByteCount > MaxLogFileBytes)
+            {
+                File.Move(logFilePath, logFilePath + ".bak", true);
+            }
+
+            File.AppendAllText(logFilePath, entries);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            if (ownsMutex)
+            {
+                try { crossProcessMutex!.ReleaseMutex(); } catch { }
+            }
+            crossProcessMutex?.Dispose();
+        }
     }
 
     public void Flush()
@@ -229,7 +393,6 @@ public class FileLoggerService : ILoggerService, IDisposable
 
         _queue.Writer.TryComplete();
         try { _writerTask.GetAwaiter().GetResult(); } catch { }
-        try { _crossProcessMutex?.Dispose(); } catch { }
         GC.SuppressFinalize(this);
     }
 

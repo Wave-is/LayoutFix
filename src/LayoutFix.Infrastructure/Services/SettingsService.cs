@@ -258,6 +258,7 @@ public class SettingsService : ISettingsService
         settings.UserExceptions ??= defaults.UserExceptions;
         settings.UserAutocorrect ??= defaults.UserAutocorrect;
         settings.DisabledLanguages ??= defaults.DisabledLanguages;
+        settings.DiagnosticLogDirectory ??= defaults.DiagnosticLogDirectory;
 
         if (settings.Version < 5)
         {
