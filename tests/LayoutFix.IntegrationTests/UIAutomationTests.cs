@@ -7,6 +7,92 @@ namespace LayoutFix.IntegrationTests;
 public class UIAutomationTests
 {
     [Fact]
+    public async Task OpenTranslator_UsesNonBlockingDirectCaptureAndPassesSelection()
+    {
+        var transaction = new TranslatorCaptureTextTransactionService("selected text");
+        var translator = new RecordingTranslatorWindowProvider();
+        using var coordinator = new HotkeyCoordinator(
+            new FakeKeyboardHook(),
+            transaction,
+            new FakeSettingsService(),
+            new FakeKeyboardLayoutManager(),
+            new LayoutConverter(),
+            new TextTransformer(),
+            new TransliterationService(),
+            new NumberToTextConverter(),
+            new NullLogger(),
+            new RecordingActiveWindowProvider(),
+            new NullSoundService(),
+            new FakeTranslationCoordinator(),
+            translator);
+
+        await coordinator.ExecuteActionAsync(HotkeyAction.OpenTranslator);
+
+        Assert.Equal(0, transaction.ClipboardCaptureCount);
+        Assert.Equal(1, transaction.DirectCaptureCount);
+        Assert.Equal("selected text", translator.InitialText);
+        Assert.Equal(1, translator.ShowCount);
+    }
+
+    [Fact]
+    public async Task OpenTranslator_StillOpensWhenDirectSelectionIsUnavailable()
+    {
+        var transaction = new TranslatorCaptureTextTransactionService(null);
+        var translator = new RecordingTranslatorWindowProvider();
+        using var coordinator = new HotkeyCoordinator(
+            new FakeKeyboardHook(),
+            transaction,
+            new FakeSettingsService(),
+            new FakeKeyboardLayoutManager(),
+            new LayoutConverter(),
+            new TextTransformer(),
+            new TransliterationService(),
+            new NumberToTextConverter(),
+            new NullLogger(),
+            new RecordingActiveWindowProvider(),
+            new NullSoundService(),
+            new FakeTranslationCoordinator(),
+            translator);
+
+        await coordinator.ExecuteActionAsync(HotkeyAction.OpenTranslator);
+
+        Assert.Equal(0, transaction.ClipboardCaptureCount);
+        Assert.Equal(1, transaction.DirectCaptureCount);
+        Assert.Equal(string.Empty, translator.InitialText);
+        Assert.Equal(1, translator.ShowCount);
+    }
+
+    [Fact]
+    public async Task DefaultTranslatorShortcut_DoesNotSuppressChromeReopenTabGesture()
+    {
+        var hook = new FakeKeyboardHook();
+        var translator = new RecordingTranslatorWindowProvider();
+        using var coordinator = new HotkeyCoordinator(
+            hook,
+            new TranslatorCaptureTextTransactionService(null),
+            new FakeSettingsService(),
+            new FakeKeyboardLayoutManager(),
+            new LayoutConverter(),
+            new TextTransformer(),
+            new TransliterationService(),
+            new NumberToTextConverter(),
+            new NullLogger(),
+            new RecordingActiveWindowProvider(),
+            new NullSoundService(),
+            new FakeTranslationCoordinator(),
+            translator);
+        coordinator.Initialize();
+
+        var browserGesture = hook.Press(HotkeyCombo.Parse("Ctrl+Shift+T"));
+        var translatorGesture = hook.Press(HotkeyCombo.Parse("Ctrl+Alt+Space"));
+        await translator.Shown.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.False(browserGesture.Handled);
+        Assert.True(translatorGesture.Handled);
+        Assert.Equal(1, translator.ShowCount);
+    }
+
+    [Fact]
     public async Task FixLayout_CopiesConvertsPastesAndSwitchesLayout()
     {
         var transaction = new RecordingTextTransactionService("ghbdtn");
@@ -705,6 +791,40 @@ public class UIAutomationTests
         public Task CancelFallbackSelectionAsync(TextSelection selection, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
+    private sealed class TranslatorCaptureTextTransactionService(string? selectedText)
+        : ITextTransactionService
+    {
+        private static readonly ActiveWindowContext Window = new((nint)1, (nint)2, 3);
+        public int ClipboardCaptureCount { get; private set; }
+        public int DirectCaptureCount { get; private set; }
+
+        public Task<TextSelection?> CaptureAsync(
+            bool allowPreviousWordFallback,
+            CancellationToken cancellationToken = default)
+        {
+            ClipboardCaptureCount++;
+            throw new InvalidOperationException("Translator must not use clipboard capture.");
+        }
+
+        public Task<TextSelection?> CaptureDirectAsync(
+            CancellationToken cancellationToken = default)
+        {
+            DirectCaptureCount++;
+            return Task.FromResult(string.IsNullOrEmpty(selectedText)
+                ? null
+                : new TextSelection(selectedText, Window, false));
+        }
+
+        public Task<bool> ReplaceAsync(
+            TextSelection selection,
+            string replacement,
+            CancellationToken cancellationToken = default) => Task.FromResult(false);
+
+        public Task CancelFallbackSelectionAsync(
+            TextSelection selection,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
     private sealed class MissingTextTransactionService : ITextTransactionService
     {
         public Task<TextSelection?> CaptureAsync(
@@ -1072,6 +1192,21 @@ public class UIAutomationTests
     private sealed class NullTranslatorWindowProvider : ITranslatorWindowProvider
     {
         public void ShowTranslator(string initialText = "") { }
+    }
+
+    private sealed class RecordingTranslatorWindowProvider : ITranslatorWindowProvider
+    {
+        public int ShowCount { get; private set; }
+        public string? InitialText { get; private set; }
+        public TaskCompletionSource Shown { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void ShowTranslator(string initialText = "")
+        {
+            ShowCount++;
+            InitialText = initialText;
+            Shown.TrySetResult();
+        }
     }
 
     private sealed class RecordingPopupService : IPopupService

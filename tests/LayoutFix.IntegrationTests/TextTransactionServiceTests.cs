@@ -7,6 +7,54 @@ namespace LayoutFix.IntegrationTests;
 public class TextTransactionServiceTests
 {
     [Fact]
+    public async Task DirectCapture_ReadsVerifiedSelectionWithoutClipboardOrInput()
+    {
+        var clipboard = new FakeClipboardService("private clipboard payload");
+        var input = new FakeInputInjector(clipboard);
+        var guard = new SelectedTextTargetGuard("selected text")
+        {
+            ReturnVerifiedSelection = true
+        };
+        var service = new TextTransactionService(
+            input,
+            clipboard,
+            new FakeActiveWindowProvider(),
+            new NullLogger(),
+            guard);
+
+        var selection = await service.CaptureDirectAsync();
+
+        Assert.Equal("selected text", selection?.Text);
+        Assert.Equal(1, guard.SelectionReadCount);
+        Assert.Equal(0, guard.CanModifyCount);
+        Assert.Equal(0, clipboard.CaptureCount);
+        Assert.Equal(0, input.SelectWordCount);
+        Assert.Equal("private clipboard payload", clipboard.Value);
+    }
+
+    [Fact]
+    public async Task DirectCapture_UnsupportedSelectionReturnsImmediatelyWithoutClipboardFallback()
+    {
+        var clipboard = new FakeClipboardService("private clipboard payload");
+        var input = new FakeInputInjector(clipboard);
+        var guard = new SelectedTextTargetGuard((string?)null);
+        var service = new TextTransactionService(
+            input,
+            clipboard,
+            new FakeActiveWindowProvider(),
+            new NullLogger(),
+            guard);
+
+        var selection = await service.CaptureDirectAsync();
+
+        Assert.Null(selection);
+        Assert.Equal(1, guard.SelectionReadCount);
+        Assert.Equal(0, clipboard.CaptureCount);
+        Assert.Equal(0, input.SelectWordCount);
+        Assert.Equal("private clipboard payload", clipboard.Value);
+    }
+
+    [Fact]
     public async Task SecureTarget_IsRejectedBeforeClipboardOrInput()
     {
         var clipboard = new FakeClipboardService("secret");

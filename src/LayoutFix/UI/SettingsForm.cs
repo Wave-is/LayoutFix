@@ -1011,7 +1011,7 @@ public class SettingsForm : Form
         AddTlpRow(tlp, 5, "Translate1", _locService.GetString("Settings_TranslateLang1", "Translate to Lang 1"), "Alt+Shift+T", "", "");
         AddTlpRow(tlp, 6, "Translate2", _locService.GetString("Settings_TranslateLang2", "Translate to Lang 2 (En)"), "Alt+T", "", "");
         AddTlpRow(tlp, 7, "Translate3", _locService.GetString("Settings_TranslateLang3", "Translate to Lang 3"), "Ctrl+Alt+T", "", "");
-        AddTlpRow(tlp, 8, "OpenTranslator", _locService.GetString("Settings_OpenTranslator", "Open Translator"), "Ctrl+Shift+T", "", "");
+        AddTlpRow(tlp, 8, "OpenTranslator", _locService.GetString("Settings_OpenTranslator", "Open Translator"), "Ctrl+Alt+Space", "", "");
         AddTlpRow(tlp, 9, "Undo", _locService.GetString("Settings_UndoAutoCorrection", "Undo last auto-correction"), "Ctrl+Shift+Backspace", "", "");
 
         tlp.ResumeLayout(false);

@@ -340,6 +340,26 @@ public class SettingsService : ISettingsService
                 }
             }
         }
+
+        if (settings.Version < 13)
+        {
+            // Ctrl+Shift+T is the standard browser command for reopening the
+            // last closed tab. LayoutFix previously swallowed that gesture
+            // globally. Migrate only the exact former translator default and
+            // preserve every other user-assigned shortcut unchanged.
+            foreach (var config in settings.HotkeyConfigs.Where(config =>
+                         string.Equals(
+                             config.Action,
+                             nameof(HotkeyAction.OpenTranslator),
+                             StringComparison.OrdinalIgnoreCase) &&
+                         string.Equals(
+                             config.Hotkey,
+                             "Ctrl+Shift+T",
+                             StringComparison.OrdinalIgnoreCase)))
+            {
+                config.Hotkey = "Ctrl+Alt+Space";
+            }
+        }
         return settings;
     }
 }

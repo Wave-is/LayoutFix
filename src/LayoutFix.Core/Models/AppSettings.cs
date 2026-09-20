@@ -4,7 +4,7 @@ namespace LayoutFix.Core.Models;
 
 public class AppSettings
 {
-    public const int CurrentVersion = 12;
+    public const int CurrentVersion = 13;
     public static IReadOnlyList<string> DefaultAutoConversionBlacklistedProcesses { get; } =
     [
         "devenv.exe", "Code.exe", "Code - Insiders.exe", "VSCodium.exe",
@@ -60,7 +60,7 @@ public class AppSettings
         new() { Action = "Translate1", Hotkey = "Alt+Shift+T", Preset = 1, Enabled = true },
         new() { Action = "Translate2", Hotkey = "Alt+T", Preset = 1, Enabled = true },
         new() { Action = "Translate3", Hotkey = "Ctrl+Alt+T", Preset = 1, Enabled = true },
-        new() { Action = "OpenTranslator", Hotkey = "Ctrl+Shift+T", Preset = 1, Enabled = true },
+        new() { Action = "OpenTranslator", Hotkey = "Ctrl+Alt+Space", Preset = 1, Enabled = true },
         new() { Action = "Undo", Hotkey = "Ctrl+Shift+Backspace", Preset = 1, Enabled = true }
     };
 

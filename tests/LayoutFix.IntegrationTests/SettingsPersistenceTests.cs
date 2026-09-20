@@ -407,6 +407,57 @@ public sealed class SettingsPersistenceTests : IDisposable
     }
 
     [Fact]
+    public void Version12Profile_MovesOnlyFormerTranslatorDefaultAwayFromBrowserShortcut()
+    {
+        var settingsPath = Path.Combine(_temporaryDirectory, "v12", "settings.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+        var oldSettings = new AppSettings
+        {
+            Version = 12,
+            HotkeyConfigs =
+            [
+                new HotkeyConfig
+                {
+                    Action = nameof(HotkeyAction.OpenTranslator),
+                    Hotkey = "Ctrl+Shift+T",
+                    Preset = 1,
+                    Enabled = true
+                },
+                new HotkeyConfig
+                {
+                    Action = nameof(HotkeyAction.Translate1),
+                    Hotkey = "Ctrl+Shift+T",
+                    Preset = 1,
+                    Enabled = false
+                },
+                new HotkeyConfig
+                {
+                    Action = nameof(HotkeyAction.OpenTranslator),
+                    Hotkey = "F9",
+                    Preset = 2,
+                    Enabled = true
+                }
+            ]
+        };
+        File.WriteAllText(settingsPath, System.Text.Json.JsonSerializer.Serialize(oldSettings));
+
+        var service = new SettingsService(settingsPath);
+
+        Assert.Contains(service.Current.HotkeyConfigs, config =>
+            config.Action == nameof(HotkeyAction.OpenTranslator) &&
+            config.Hotkey == "Ctrl+Alt+Space" &&
+            config.Enabled);
+        Assert.Contains(service.Current.HotkeyConfigs, config =>
+            config.Action == nameof(HotkeyAction.Translate1) &&
+            config.Hotkey == "Ctrl+Shift+T" &&
+            !config.Enabled);
+        Assert.Contains(service.Current.HotkeyConfigs, config =>
+            config.Action == nameof(HotkeyAction.OpenTranslator) &&
+            config.Hotkey == "F9");
+        Assert.Equal(AppSettings.CurrentVersion, service.Current.Version);
+    }
+
+    [Fact]
     public void LockedVersion10Profile_LoadsSafeMigrationInMemoryWithoutOverwritingDurableFile()
     {
         var settingsPath = Path.Combine(_temporaryDirectory, "v10-locked", "settings.json");

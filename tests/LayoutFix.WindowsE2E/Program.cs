@@ -174,6 +174,8 @@ internal static class Program
             return RunTranslatorBehaviorTest();
         if (args.Length >= 1 && args[0] == "--translator-localization-test")
             return RunTranslatorLocalizationTest();
+        if (args.Length >= 1 && args[0] == "--translator-provider-test")
+            return RunTranslatorProviderTest();
         if (args.Length >= 1 && args[0] == "--notification-focus-test")
             return RunNotificationFocusTest();
         if (args.Length >= 1 && args[0] == "--clipboard-formats-test")
@@ -6493,6 +6495,76 @@ internal static class Program
             }
 
             Console.WriteLine("translator-localization=pass cultures=en,ru,uk native-language-names=pass");
+            return 0;
+        }
+        finally
+        {
+            try { Directory.Delete(testDirectory, recursive: true); } catch { }
+        }
+    }
+
+    private static int RunTranslatorProviderTest()
+    {
+        var testDirectory = Path.Combine(
+            Path.GetTempPath(),
+            $"LayoutFix.TranslatorProviderE2E.{Guid.NewGuid():N}");
+        Directory.CreateDirectory(testDirectory);
+        try
+        {
+            var settings = new SettingsService(Path.Combine(testDirectory, "settings.json"));
+            settings.Current.TranslationHistoryEnabled = false;
+            settings.Save(settings.Current);
+            using var provider = new TranslatorWindowProvider(
+                new CountingTranslationService(),
+                new UnavailableOfflineTranslationService(),
+                new RecordingTranslationHistoryService(),
+                new PassthroughLocalizationService(),
+                settings,
+                new E2ENullLogger());
+
+            var prepare = Stopwatch.StartNew();
+            provider.Prepare();
+            prepare.Stop();
+
+            var firstShow = Stopwatch.StartNew();
+            provider.ShowTranslator();
+            Application.DoEvents();
+            firstShow.Stop();
+            var first = Application.OpenForms.OfType<TranslatorForm>().SingleOrDefault();
+            if (first == null || !first.Visible || first.IsDisposed)
+                return 58;
+            var originalHandle = first.Handle;
+
+            first.Close();
+            Application.DoEvents();
+            if (first.IsDisposed || first.Visible)
+                return 59;
+
+            var secondShow = Stopwatch.StartNew();
+            Task.Run(() => provider.ShowTranslator()).GetAwaiter().GetResult();
+            var showDeadline = DateTime.UtcNow.AddSeconds(2);
+            do
+            {
+                Application.DoEvents();
+                Thread.Sleep(10);
+            }
+            while (!first.Visible && DateTime.UtcNow < showDeadline);
+            secondShow.Stop();
+            var second = Application.OpenForms.OfType<TranslatorForm>().SingleOrDefault();
+            if (second == null ||
+                second.IsDisposed ||
+                !second.Visible ||
+                second.Handle != originalHandle)
+            {
+                return 60;
+            }
+
+            Console.WriteLine(
+                "translator-provider=pass " +
+                $"prepare-ms={prepare.ElapsedMilliseconds} " +
+                $"first-show-ms={firstShow.ElapsedMilliseconds} " +
+                $"second-show-ms={secondShow.ElapsedMilliseconds} " +
+                "window-reused=True");
             return 0;
         }
         finally

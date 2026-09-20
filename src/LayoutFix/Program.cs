@@ -106,6 +106,7 @@ internal static class Program
             _ = services.GetRequiredService<AutoConversionService>();
             var dictionaryAnalyzer = services.GetRequiredService<DictionaryAnalyzer>();
             var logger = services.GetRequiredService<ILoggerService>();
+            var translatorWindowProvider = services.GetRequiredService<ITranslatorWindowProvider>();
             LogApplicationIdentity(logger);
             try
             {
@@ -131,6 +132,26 @@ internal static class Program
             // timer retries on the message-loop thread until both hooks start.
             hookRecovery.RequestRecovery();
             hookRecovery.RecoverIfRequested();
+
+            // Build the reusable translator form after startup reaches its first
+            // idle turn. The global shortcut then only has to show an existing
+            // window instead of constructing the full DPI-aware UI on demand.
+            EventHandler warmTranslator = null!;
+            warmTranslator = (_, _) =>
+            {
+                Application.Idle -= warmTranslator;
+                try
+                {
+                    translatorWindowProvider.Prepare();
+                }
+                catch (Exception exception)
+                {
+                    logger.LogError(
+                        "Translator window warm-up failed; on-demand creation remains available.",
+                        exception);
+                }
+            };
+            Application.Idle += warmTranslator;
 
             Application.Run();
         }

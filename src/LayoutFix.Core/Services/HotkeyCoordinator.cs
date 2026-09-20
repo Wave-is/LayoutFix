@@ -444,6 +444,25 @@ public class HotkeyCoordinator : IHotkeyCoordinator
                 return;
             }
 
+            if (action == HotkeyAction.OpenTranslator)
+            {
+                // Opening the translator is useful even when no text is selected.
+                // Never make its window wait for clipboard retries: use only a
+                // direct accessibility read and fall back to an empty source box.
+                progress.Enter(ActionExecutionStage.TextCapture);
+                var translatorSelection = await _textTransactionService.CaptureDirectAsync(
+                    cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                var translatorText = translatorSelection?.Text ?? string.Empty;
+                _logger.LogInfo(
+                    $"Translator direct capture completed. Length: {translatorText.Length}");
+                progress.Enter(ActionExecutionStage.TranslatorOpening);
+                _logger.LogInfo("Opening Translator Window...");
+                _translatorWindowProvider.ShowTranslator(translatorText);
+                cancellationToken.ThrowIfCancellationRequested();
+                return;
+            }
+
             progress.Enter(ActionExecutionStage.TextCapture);
             var selection = await _textTransactionService.CaptureAsync(
                 allowPreviousWordFallback: action is HotkeyAction.FixLayout or HotkeyAction.Undo,
@@ -453,15 +472,6 @@ public class HotkeyCoordinator : IHotkeyCoordinator
             cancellationToken.ThrowIfCancellationRequested();
             var text = selection?.Text;
             _logger.LogInfo($"Text capture completed. Length: {text?.Length ?? 0}");
-
-            if (action == HotkeyAction.OpenTranslator)
-            {
-                progress.Enter(ActionExecutionStage.TranslatorOpening);
-                _logger.LogInfo("Opening Translator Window...");
-                _translatorWindowProvider.ShowTranslator(text ?? "");
-                cancellationToken.ThrowIfCancellationRequested();
-                return;
-            }
 
             if (selection == null || string.IsNullOrEmpty(text))
             {

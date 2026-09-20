@@ -352,6 +352,82 @@ public sealed class TextTransactionService : ITextTransactionService
         }
     }
 
+    public async Task<TextSelection?> CaptureDirectAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var captureId = Interlocked.Increment(ref _nextDiagnosticCaptureId);
+        var window = _activeWindow.CaptureActiveWindow();
+        if (!window.IsValid)
+        {
+            LogSupportDiagnostic(captureId, "capture", "rejected", "active-window-unavailable-direct-only");
+            return null;
+        }
+
+        LogCaptureTarget(captureId, window, allowPreviousWordFallback: false);
+        var captureInputGeneration = CaptureInputGeneration();
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (InputChanged(captureInputGeneration) || !_activeWindow.IsSameActiveWindow(window))
+            {
+                LogSupportDiagnostic(captureId, "capture", "rejected", "context-changed-before-direct-read");
+                return null;
+            }
+
+            var selectionRead = _targetGuard != null
+                ? await _targetGuard.TryReadSelectedTextAsync(window, cancellationToken)
+                : TextSelectionReadResult.Unsupported;
+            if (!selectionRead.IsSupported ||
+                !selectionRead.IsSafeToModify ||
+                string.IsNullOrEmpty(selectionRead.Text))
+            {
+                LogSupportDiagnostic(
+                    captureId,
+                    "capture",
+                    "observed",
+                    "direct-only-selection-unavailable",
+                    $"Supported={selectionRead.IsSupported}; Safe={selectionRead.IsSafeToModify}; " +
+                    $"Length={selectionRead.Text?.Length ?? 0}");
+                return null;
+            }
+
+            if (InputChanged(captureInputGeneration) || !_activeWindow.IsSameActiveWindow(window))
+            {
+                LogSupportDiagnostic(captureId, "capture", "rejected", "context-changed-after-direct-read");
+                return null;
+            }
+
+            LogSupportDiagnostic(
+                captureId,
+                "capture",
+                "accepted",
+                "direct-only-selection",
+                $"Length={selectionRead.Text.Length}");
+            return new TextSelection(
+                selectionRead.Text,
+                window,
+                WasSelectedByFallback: false,
+                captureInputGeneration.Keyboard,
+                captureInputGeneration.Mouse,
+                DiagnosticCaptureId: captureId);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError("Direct text capture failed", exception);
+            LogSupportDiagnostic(
+                captureId,
+                "capture",
+                "failed",
+                "direct-only-exception",
+                $"ExceptionType={DiagnosticValue(exception.GetType().FullName)}; HResult=0x{exception.HResult:X8}");
+            return null;
+        }
+    }
+
     public async Task<bool> ReplaceAsync(
         TextSelection selection,
         string replacement,
