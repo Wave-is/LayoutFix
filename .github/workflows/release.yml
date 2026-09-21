@@ -267,6 +267,8 @@ jobs:
           $e2e = "tests\LayoutFix.WindowsE2E\bin\Release\net8.0-windows\win-x64\LayoutFix.WindowsE2E.exe"
           & $e2e --startup-lifecycle-test "$publish\LayoutFix.exe"
           if ($LASTEXITCODE -ne 0) { throw "Published startup lifecycle E2E failed with $LASTEXITCODE." }
+          & $e2e --portable-update-test "$publish\LayoutFix.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Published portable update E2E failed with $LASTEXITCODE." }
           & $e2e --startup-recovery-test "$publish\LayoutFix.exe"
           if ($LASTEXITCODE -ne 0) { throw "Published startup recovery E2E failed with $LASTEXITCODE." }
           & $e2e --session-recovery-test "$publish\LayoutFix.exe"
