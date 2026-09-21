@@ -43,6 +43,33 @@ public sealed class SettingsPersistenceTests : IDisposable
     }
 
     [Fact]
+    public void Schema13Profile_EnablesStableAutomaticUpdatesByDefault()
+    {
+        var settingsPath = Path.Combine(_temporaryDirectory, "schema13-updates.json");
+        File.WriteAllText(settingsPath, "{\"Version\":13,\"UiLanguage\":\"ru\"}");
+
+        var service = new SettingsService(settingsPath);
+
+        Assert.Equal(AppSettings.CurrentVersion, service.Current.Version);
+        Assert.True(service.Current.AutoUpdateEnabled);
+        Assert.Equal("ru", service.Current.UiLanguage);
+    }
+
+    [Fact]
+    public void ExplicitAutomaticUpdateOptOut_IsPreserved()
+    {
+        var settingsPath = Path.Combine(_temporaryDirectory, "updates-opt-out.json");
+        File.WriteAllText(
+            settingsPath,
+            "{\"Version\":13,\"AutoUpdateEnabled\":false}");
+
+        var service = new SettingsService(settingsPath);
+
+        Assert.False(service.Current.AutoUpdateEnabled);
+        Assert.Equal(AppSettings.CurrentVersion, service.Current.Version);
+    }
+
+    [Fact]
     public async Task ConcurrentSaves_PublishTheSameWinnerInMemoryAndOnDisk()
     {
         var settingsPath = Path.Combine(_temporaryDirectory, "concurrent", "settings.json");

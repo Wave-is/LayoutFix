@@ -49,3 +49,25 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\LayoutFix.exe"; Description: "Launch LayoutFix now"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\LayoutFix.exe"; Flags: nowait; Check: ShouldLaunchAfterSilentUpdate
+
+[Code]
+function HasExactCommandLineSwitch(const Value: String): Boolean;
+var
+  Index: Integer;
+begin
+  Result := False;
+  for Index := 1 to ParamCount do
+  begin
+    if CompareText(ParamStr(Index), Value) = 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
+function ShouldLaunchAfterSilentUpdate(): Boolean;
+begin
+  Result := WizardSilent and HasExactCommandLineSwitch('/LAUNCHAFTERUPDATE');
+end;

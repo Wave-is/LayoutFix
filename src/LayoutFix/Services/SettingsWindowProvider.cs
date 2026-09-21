@@ -11,7 +11,8 @@ public sealed class SettingsWindowProvider(
     ILoggerService logger,
     ModelDownloadService modelDownloadService,
     ITranslationHistoryService translationHistoryService,
-    ITranslationCredentialStore translationCredentials)
+    ITranslationCredentialStore translationCredentials,
+    IAppUpdateService updateService)
 {
     private SettingsForm? _form;
 
@@ -26,7 +27,8 @@ public sealed class SettingsWindowProvider(
                 logger,
                 modelDownloadService,
                 translationHistoryService,
-                translationCredentials);
+                translationCredentials,
+                updateService);
             _form.FormClosed += (_, _) => _form = null;
         }
 

@@ -324,6 +324,19 @@ jobs:
           $hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
           Set-Content -Path "$installer.sha256" -Value "$hash *LayoutFix_Setup.exe" -Encoding ascii
 
+      - name: Generate verified portable update package
+        shell: pwsh
+        run: |
+          $publish = "src\LayoutFix\bin\Release\net8.0-windows\win-x64\publish"
+          $portable = "Output\LayoutFix_Portable_win-x64.zip"
+          if (Test-Path -LiteralPath $portable) {
+            Remove-Item -LiteralPath $portable -Force
+          }
+          Compress-Archive -Path "$publish\*" -DestinationPath $portable -CompressionLevel Optimal
+          $hash = (Get-FileHash $portable -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -Path "$portable.sha256" `
+            -Value "$hash *LayoutFix_Portable_win-x64.zip" -Encoding ascii
+
       - name: Verify release artifact contract
         shell: pwsh
         run: tests\Verify-ReleaseCandidate.ps1 -AllowUnsigned
@@ -334,6 +347,8 @@ jobs:
           files: |
             Output/LayoutFix_Setup.exe
             Output/LayoutFix_Setup.exe.sha256
+            Output/LayoutFix_Portable_win-x64.zip
+            Output/LayoutFix_Portable_win-x64.zip.sha256
           name: LayoutFix ${{ github.ref_name }}
           draft: false
           prerelease: false

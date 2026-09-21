@@ -3,6 +3,7 @@ using LayoutFix.Core.Interfaces;
 using LayoutFix.Core.Services;
 using LayoutFix.Infrastructure.Services;
 using LayoutFix.UI;
+using LayoutFix.Services;
 using Microsoft.Win32;
 using System.Diagnostics;
 using System.Reflection;
@@ -17,6 +18,15 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Length == 7 &&
+            string.Equals(args[0], "--apply-update", StringComparison.OrdinalIgnoreCase))
+        {
+            return LayoutFix.Services.AppUpdateInstaller
+                .RunAsync(args)
+                .GetAwaiter()
+                .GetResult();
+        }
+
         if (args.Length is 2 or 3 &&
             string.Equals(args[0], "--translation-worker", StringComparison.OrdinalIgnoreCase))
         {
@@ -107,6 +117,7 @@ internal static class Program
             var dictionaryAnalyzer = services.GetRequiredService<DictionaryAnalyzer>();
             var logger = services.GetRequiredService<ILoggerService>();
             var translatorWindowProvider = services.GetRequiredService<ITranslatorWindowProvider>();
+            var updateService = services.GetRequiredService<IAppUpdateService>();
             LogApplicationIdentity(logger);
             try
             {
@@ -152,6 +163,22 @@ internal static class Program
                 }
             };
             Application.Idle += warmTranslator;
+
+            EventHandler startUpdateCheck = null!;
+            startUpdateCheck = (_, _) =>
+            {
+                Application.Idle -= startUpdateCheck;
+                if (settings.Current.AutoUpdateEnabled &&
+                    updateService.State.Status == AppUpdateStatus.ReadyToInstall &&
+                    updateService.TryStartInstaller())
+                {
+                    Application.Exit();
+                    return;
+                }
+
+                updateService.StartAutomaticCheck();
+            };
+            Application.Idle += startUpdateCheck;
 
             Application.Run();
         }

@@ -29,6 +29,7 @@ A lightweight, powerful Windows background utility designed to solve common typi
 - **Two-level App Exceptions**: Globally disable every LayoutFix action in selected processes, or disable only automatic correction while keeping manual hotkeys available. The automatic-only list can restore the built-in IDE, terminal, remote-desktop, and Adobe safety defaults with one click.
 - **Custom Dictionary and Replacements**: Keep abbreviations unchanged and define explicit `typed → replacement` pairs.
 - **Native UI**: Dark/Light theme support with fully localized core Settings flows in English, Russian, and Ukrainian.
+- **Verified GitHub updates**: LayoutFix checks the latest stable GitHub release in the background, downloads the matching installer or portable package, verifies its SHA-256 digest and version, and prepares it without interrupting your work. Apply it with the small update action in the tray/About page, or let LayoutFix install it on the next launch.
 
 ### Safety and privacy
 
@@ -46,6 +47,8 @@ A lightweight, powerful Windows background utility designed to solve common typi
 1. Go to the [Releases](../../releases) tab.
 2. Download `LayoutFix_Setup.exe`.
 3. Verify the adjacent `LayoutFix_Setup.exe.sha256` checksum, then install the app. It will silently run in your system tray.
+
+The first updater-enabled release must be installed manually over an older build. After that one-time bootstrap, future stable releases can be downloaded and applied inside LayoutFix.
 
 > **Unsigned installer notice:** the v1.0.22 installer is intentionally distributed without an Authenticode signature, so Windows SmartScreen may show an unknown-publisher warning. Install it only after verifying the checksum. Automatic correction remains disabled by default.
 
@@ -67,6 +70,7 @@ A lightweight, powerful Windows background utility designed to solve common typi
 - **Два уровня исключений программ**: Можно полностью отключить LayoutFix в выбранных процессах либо запретить только автоисправление, сохранив ручные хоткеи. Встроенный безопасный набор для IDE, терминалов, удалённого рабочего стола и Adobe восстанавливается одной кнопкой.
 - **Словарь и свои автозамены**: Добавляйте слова-исключения и пары `что введено → на что заменить`.
 - **Нативный интерфейс**: Красивая темная и светлая тема под стиль Windows 11.
+- **Проверенные обновления с GitHub**: LayoutFix в фоне проверяет последний стабильный GitHub-релиз, скачивает подходящий установщик или portable-пакет, сверяет SHA-256 и версию и готовит обновление, не мешая работе. Применить его можно маленькой кнопкой в трее/«О программе» либо автоматически при следующем запуске.
 
 ### Безопасность и приватность
 
@@ -84,6 +88,8 @@ A lightweight, powerful Windows background utility designed to solve common typi
 1. Перейдите на вкладку [Releases](../../releases).
 2. Скачайте `LayoutFix_Setup.exe`.
 3. Сверьте контрольную сумму с файлом `LayoutFix_Setup.exe.sha256`, затем установите программу — она свернется в системный трей и будет работать в фоне.
+
+Первую версию со встроенным обновлятором нужно один раз установить вручную поверх старой. После этого следующие стабильные релизы можно скачивать и применять прямо внутри LayoutFix.
 
 > **Неподписанный установщик:** v1.0.22 намеренно распространяется без подписи Authenticode, поэтому Windows SmartScreen может показать предупреждение о неизвестном издателе. Устанавливайте его только после проверки контрольной суммы. Автоисправление по умолчанию выключено.
 
@@ -105,6 +111,7 @@ A lightweight, powerful Windows background utility designed to solve common typi
 - **Два рівні винятків програм**: Можна повністю вимкнути LayoutFix у вибраних процесах або заборонити лише автовиправлення, зберігши ручні гарячі клавіші. Вбудований безпечний набір для IDE, терміналів, віддаленого робочого столу й Adobe відновлюється однією кнопкою.
 - **Словник і власні автозаміни**: Додавайте слова-винятки та пари `введений текст → заміна`.
 - **Сучасний дизайн**: Красива темна та світла тема в стилі Windows 11.
+- **Перевірені оновлення з GitHub**: LayoutFix у фоні перевіряє останній стабільний GitHub-реліз, завантажує відповідний інсталятор або portable-пакет, звіряє SHA-256 і версію та готує оновлення без переривання роботи. Застосувати його можна маленькою кнопкою у треї/«Про програму» або автоматично під час наступного запуску.
 
 ### Безпека та приватність
 
@@ -120,6 +127,8 @@ A lightweight, powerful Windows background utility designed to solve common typi
 1. Перейдіть на вкладку [Releases](../../releases).
 2. Завантажте `LayoutFix_Setup.exe`.
 3. Звірте контрольну суму з файлом `LayoutFix_Setup.exe.sha256`, потім установіть програму — вона згорнеться в системний трей.
+
+Першу версію з вбудованим оновлювачем потрібно один раз встановити вручну поверх старої. Після цього наступні стабільні релізи можна завантажувати й застосовувати безпосередньо в LayoutFix.
 
 > **Непідписаний інсталятор:** v1.0.22 навмисно поширюється без підпису Authenticode, тому Windows SmartScreen може показати попередження про невідомого видавця. Встановлюйте його лише після перевірки контрольної суми. Автовиправлення типово вимкнене.
 

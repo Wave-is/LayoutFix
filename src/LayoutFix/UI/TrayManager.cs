@@ -16,14 +16,18 @@ public class TrayManager : IDisposable
     private readonly IHotkeyCoordinator _hotkeyCoordinator;
     private readonly SettingsWindowProvider _settingsWindowProvider;
     private readonly ITranslatorWindowProvider _translatorWindowProvider;
+    private readonly IAppUpdateService _updateService;
     private readonly HookRecoveryCoordinator _hookRecoveryCoordinator;
     private readonly ILocalizationService _locService;
+    private readonly SynchronizationContext _uiContext;
     private readonly System.Windows.Forms.Timer _layoutTimer;
     private string _lastLayout = string.Empty;
     private bool _lastUseFlagIcons = true;
     private bool _lastEnabled = true;
     private ToolStripMenuItem? _autoCorrectionMenuItem;
     private ToolStripMenuItem? _hookStatusMenuItem;
+    private ToolStripMenuItem? _updateMenuItem;
+    private string? _notifiedUpdateVersion;
     private bool _updatingMenuState;
     private bool _disposed;
 
@@ -32,6 +36,7 @@ public class TrayManager : IDisposable
         IHotkeyCoordinator hotkeyCoordinator,
         SettingsWindowProvider settingsWindowProvider,
         ITranslatorWindowProvider translatorWindowProvider,
+        IAppUpdateService updateService,
         HookRecoveryCoordinator hookRecoveryCoordinator,
         ILocalizationService locService)
     {
@@ -41,8 +46,10 @@ public class TrayManager : IDisposable
         _hotkeyCoordinator = hotkeyCoordinator;
         _settingsWindowProvider = settingsWindowProvider;
         _translatorWindowProvider = translatorWindowProvider;
+        _updateService = updateService;
         _hookRecoveryCoordinator = hookRecoveryCoordinator;
         _locService = locService;
+        _uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
 
         _notifyIcon = new NotifyIcon
         {
@@ -52,13 +59,16 @@ public class TrayManager : IDisposable
         };
 
         _notifyIcon.MouseClick += NotifyIcon_MouseClick;
+        _notifyIcon.BalloonTipClicked += NotifyIcon_BalloonTipClicked;
 
         _layoutTimer = new System.Windows.Forms.Timer { Interval = 300 };
         _layoutTimer.Tick += LayoutTimer_Tick;
         _layoutTimer.Start();
 
         _hookRecoveryCoordinator.OperationalStateChanged += HookRecovery_OperationalStateChanged;
+        _updateService.StateChanged += UpdateService_StateChanged;
         UpdateHookStatusMenuItem();
+        UpdateUpdateMenuItem(_updateService.State);
         UpdateTrayIcon();
     }
 
@@ -233,6 +243,77 @@ public class TrayManager : IDisposable
         UpdateTrayIcon();
     }
 
+    private void UpdateService_StateChanged(object? sender, AppUpdateState state)
+    {
+        if (_disposed) return;
+        _uiContext.Post(_ =>
+        {
+            if (_disposed) return;
+            UpdateUpdateMenuItem(state);
+            if (state.Status == AppUpdateStatus.ReadyToInstall &&
+                !string.Equals(_notifiedUpdateVersion, state.Version, StringComparison.Ordinal))
+            {
+                _notifiedUpdateVersion = state.Version;
+                _notifyIcon.BalloonTipTitle = _locService.GetString(
+                    "Update_ReadyTitle",
+                    "LayoutFix update is ready");
+                _notifyIcon.BalloonTipText = string.Format(
+                    _locService.GetString(
+                        "Update_ReadyMessage",
+                        "Version {0} was verified and downloaded. Click to restart and install it."),
+                    state.Version);
+                _notifyIcon.BalloonTipIcon = ToolTipIcon.Info;
+                _notifyIcon.ShowBalloonTip(8_000);
+            }
+        }, null);
+    }
+
+    private void NotifyIcon_BalloonTipClicked(object? sender, EventArgs eventArgs)
+        => ApplyReadyUpdate();
+
+    private void UpdateUpdateMenuItem(AppUpdateState state)
+    {
+        if (_updateMenuItem == null) return;
+        _updateMenuItem.Text = state.Status switch
+        {
+            AppUpdateStatus.Checking => _locService.GetString(
+                "Update_Checking",
+                "Checking for updates…"),
+            AppUpdateStatus.Downloading => string.Format(
+                _locService.GetString("Update_Downloading", "Downloading update: {0}%"),
+                state.ProgressPercent),
+            AppUpdateStatus.ReadyToInstall => string.Format(
+                _locService.GetString("Update_Restart", "Restart to update to {0}"),
+                state.Version),
+            AppUpdateStatus.Installing => _locService.GetString(
+                "Update_Installing",
+                "Installing update…"),
+            AppUpdateStatus.Failed => _locService.GetString(
+                "Update_Retry",
+                "Retry update check"),
+            _ => _locService.GetString("Update_Check", "Check for updates")
+        };
+        _updateMenuItem.Enabled = state.Status is not (
+            AppUpdateStatus.Checking or AppUpdateStatus.Downloading or AppUpdateStatus.Installing);
+    }
+
+    private void ActivateUpdateMenuItem()
+    {
+        if (_updateService.State.Status == AppUpdateStatus.ReadyToInstall)
+        {
+            ApplyReadyUpdate();
+            return;
+        }
+
+        _ = _updateService.CheckAndDownloadAsync(force: true);
+    }
+
+    private void ApplyReadyUpdate()
+    {
+        if (_updateService.TryStartInstaller())
+            Application.Exit();
+    }
+
     private void UpdateHookStatusMenuItem()
     {
         if (_hookStatusMenuItem != null)
@@ -313,6 +394,11 @@ public class TrayManager : IDisposable
         menu.Items.Add(_locService.GetString("Tray_Translator", "Translator..."), null, (s, e) => OpenTranslator());
         menu.Items.Add(_locService.GetString("Tray_Settings", "Settings..."), null, (s, e) => ShowSettings());
         menu.Items.Add(_locService.GetString("Tray_About", "About..."), null, (s, e) => ShowSettings()); // Assuming About is a tab in Settings
+        _updateMenuItem = new ToolStripMenuItem(
+            _locService.GetString("Update_Check", "Check for updates"),
+            null,
+            (_, _) => ActivateUpdateMenuItem());
+        menu.Items.Add(_updateMenuItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_locService.GetString("Tray_Exit", "Exit"), null, (s, e) => Application.Exit());
 
@@ -329,6 +415,8 @@ public class TrayManager : IDisposable
         if (_disposed) return;
         _disposed = true;
         _hookRecoveryCoordinator.OperationalStateChanged -= HookRecovery_OperationalStateChanged;
+        _updateService.StateChanged -= UpdateService_StateChanged;
+        _notifyIcon.BalloonTipClicked -= NotifyIcon_BalloonTipClicked;
         _layoutTimer.Stop();
         _layoutTimer.Dispose();
         _notifyIcon.Visible = false;

@@ -4,7 +4,7 @@ namespace LayoutFix.Core.Models;
 
 public class AppSettings
 {
-    public const int CurrentVersion = 13;
+    public const int CurrentVersion = 14;
     public static IReadOnlyList<string> DefaultAutoConversionBlacklistedProcesses { get; } =
     [
         "devenv.exe", "Code.exe", "Code - Insiders.exe", "VSCodium.exe",
@@ -70,6 +70,9 @@ public class AppSettings
     public bool SoundEnabled { get; set; } = false;
     public bool NotificationsEnabled { get; set; } = true;
     public bool AutoStart { get; set; } = false;
+    // Stable releases are checked and downloaded in the background. Applying
+    // an update always remains an explicit restart action.
+    public bool AutoUpdateEnabled { get; set; } = true;
     public bool UseFlagIcons { get; set; } = true;
     // Automatic correction modifies text while the user is typing. Keep it opt-in
     // until the current application and text target can be proven safe.

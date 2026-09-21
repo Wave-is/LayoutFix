@@ -7,6 +7,7 @@ using LayoutFix.Infrastructure.Input;
 using LayoutFix.Infrastructure.Layouts;
 using LayoutFix.Infrastructure.Services;
 using LayoutFix.UI;
+using LayoutFix.Services;
 
 namespace LayoutFix;
 
@@ -53,6 +54,24 @@ public static class AppHost
                 provider.GetRequiredService<ISettingsService>(),
                 historyFilePath));
         services.AddSingleton<ModelDownloadService>();
+        services.AddSingleton<IAppUpdateService>(provider =>
+        {
+            if (!string.IsNullOrWhiteSpace(settingsFilePath))
+            {
+                var isolatedRoot = Path.Combine(
+                    Path.GetDirectoryName(Path.GetFullPath(settingsFilePath))!,
+                    "updates");
+                return new LayoutFix.Services.AppUpdateService(
+                    provider.GetRequiredService<ISettingsService>(),
+                    provider.GetRequiredService<ILoggerService>(),
+                    isolatedRoot,
+                    Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "LayoutFix.exe"));
+            }
+
+            return new LayoutFix.Services.AppUpdateService(
+                provider.GetRequiredService<ISettingsService>(),
+                provider.GetRequiredService<ILoggerService>());
+        });
         services.AddSingleton<ILocalizationService, LocalizationService>();
         services.AddSingleton<ISettingsService>(_ => new SettingsService(settingsFilePath));
         services.AddSingleton<ILoggerService>(provider =>

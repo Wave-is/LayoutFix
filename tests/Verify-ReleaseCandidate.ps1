@@ -11,6 +11,8 @@ $ErrorActionPreference = 'Stop'
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $installer = Join-Path $workspace 'Output\LayoutFix_Setup.exe'
 $checksumFile = "$installer.sha256"
+$portable = Join-Path $workspace 'Output\LayoutFix_Portable_win-x64.zip'
+$portableChecksumFile = "$portable.sha256"
 $publishDirectory = Join-Path $workspace 'src\LayoutFix\bin\Release\net8.0-windows\win-x64\publish'
 $payload = Join-Path $publishDirectory 'LayoutFix.exe'
 
@@ -34,6 +36,10 @@ Assert-ReleaseCondition (Test-Path -LiteralPath $checksumFile -PathType Leaf) `
     'Release checksum is missing.'
 Assert-ReleaseCondition (Test-Path -LiteralPath $payload -PathType Leaf) `
     'Published payload is missing.'
+Assert-ReleaseCondition (Test-Path -LiteralPath $portable -PathType Leaf) `
+    'Portable update package is missing.'
+Assert-ReleaseCondition (Test-Path -LiteralPath $portableChecksumFile -PathType Leaf) `
+    'Portable update checksum is missing.'
 
 [xml]$buildProperties = Get-Content -LiteralPath (Join-Path $workspace 'Directory.Build.props')
 $version = [string]($buildProperties.Project.PropertyGroup.Version | Select-Object -First 1)
@@ -51,6 +57,42 @@ $declaredHash = $Matches[1].ToLowerInvariant()
 $actualHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
 Assert-ReleaseCondition ($actualHash -eq $declaredHash) `
     'Release installer does not match its SHA-256 checksum.'
+
+$portableChecksumLine = (Get-Content -LiteralPath $portableChecksumFile -Raw).Trim()
+Assert-ReleaseCondition (
+    $portableChecksumLine -match '^([0-9a-fA-F]{64}) \*LayoutFix_Portable_win-x64\.zip$') `
+    'Portable update checksum file has an invalid format.'
+$declaredPortableHash = $Matches[1].ToLowerInvariant()
+$actualPortableHash = (Get-FileHash -LiteralPath $portable -Algorithm SHA256).Hash.ToLowerInvariant()
+Assert-ReleaseCondition ($actualPortableHash -eq $declaredPortableHash) `
+    'Portable update package does not match its SHA-256 checksum.'
+
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$archive = [System.IO.Compression.ZipFile]::OpenRead($portable)
+try {
+    $entryNames = @($archive.Entries | ForEach-Object FullName)
+    foreach ($requiredEntry in @(
+        'LayoutFix.exe',
+        'LayoutFix.Core.dll',
+        'LayoutFix.Infrastructure.dll',
+        'translation-worker/LayoutFix.TranslationWorker.dll',
+        'Dictionaries/en.txt',
+        'locales/en.json'
+    )) {
+        Assert-ReleaseCondition ($entryNames -contains $requiredEntry) `
+            "Portable update package is missing $requiredEntry."
+    }
+    $privateArchiveEntries = @($entryNames | Where-Object {
+        $name = [System.IO.Path]::GetFileName($_)
+        $name -in @('settings.json', 'translation_history.json', 'layoutfix.log') -or
+            [System.IO.Path]::GetExtension($_) -eq '.pdb'
+    })
+    Assert-ReleaseCondition ($privateArchiveEntries.Count -eq 0) `
+        'Portable update package contains private or debug files.'
+}
+finally {
+    $archive.Dispose()
+}
 
 $payloadVersion = (Get-Item -LiteralPath $payload).VersionInfo.ProductVersion.Trim()
 $payloadPattern = '^' + [regex]::Escape($version) + '\+([0-9a-fA-F]{40})$'
@@ -125,4 +167,4 @@ if (-not $stableEligible) {
 $signatureStatus = if ($signedAndTimestamped) { 'signed' } else { 'unsigned-approved' }
 "release_artifact=pass version=$version channel=stable signature=$signatureStatus " +
     "source_commit=$sourceCommit sha256=$actualHash dictionaries=$dictionaryCount " +
-    "locales=$localeCount privacy=pass runtime_isolation=pass"
+    "portable_sha256=$actualPortableHash locales=$localeCount privacy=pass runtime_isolation=pass"

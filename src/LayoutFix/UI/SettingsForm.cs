@@ -11,6 +11,7 @@ using LayoutFix.Core.Interfaces;
 using LayoutFix.Core.Models;
 using LayoutFix.Core.Services;
 using LayoutFix.Infrastructure.Services;
+using LayoutFix.Services;
 using LayoutFix.UI.Controls;
 
 namespace LayoutFix.UI;
@@ -25,6 +26,7 @@ public class SettingsForm : Form
     private readonly ModelDownloadService _modelDownloadService;
     private readonly ITranslationHistoryService _translationHistoryService;
     private readonly ITranslationCredentialStore _translationCredentials;
+    private readonly IAppUpdateService? _updateService;
     private readonly LayoutFix.Services.SettingsPersistenceCoordinator _persistenceCoordinator;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private AppSettings _currentSettings;
@@ -58,7 +60,8 @@ public class SettingsForm : Form
         ILoggerService logger,
         ModelDownloadService modelDownloadService,
         ITranslationHistoryService translationHistoryService,
-        ITranslationCredentialStore translationCredentials)
+        ITranslationCredentialStore translationCredentials,
+        IAppUpdateService? updateService = null)
     {
         _settingsService = settingsService;
         _locService = locService;
@@ -66,6 +69,7 @@ public class SettingsForm : Form
         _modelDownloadService = modelDownloadService;
         _translationHistoryService = translationHistoryService;
         _translationCredentials = translationCredentials;
+        _updateService = updateService;
         _currentSettings = _settingsService.Current;
         _persistenceCoordinator = new LayoutFix.Services.SettingsPersistenceCoordinator(
             _settingsService,
@@ -373,6 +377,11 @@ public class SettingsForm : Form
             btn.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
             btn.BackColor = _accentColor;
             _activeTabButton = btn;
+            // Switching a large AutoScroll page can invalidate the sidebar
+            // background without repainting every inactive native Button.
+            // Repaint the complete navigation tree so no labels disappear
+            // until the next mouse-over or window expose event.
+            _pnlSidebar.Invalidate(invalidateChildren: true);
         };
 
         _pnlSidebar.Controls.Add(btn);
@@ -430,6 +439,19 @@ public class SettingsForm : Form
             _currentSettings.AutoStart,
             v => { _currentSettings.AutoStart = v; SaveSettings(); },
             "General.AutoStart"));
+        AddStackRow(stack, CreateToggleSetting(
+            _locService.GetString(
+                "Settings_AutoUpdate",
+                "Automatically download stable updates"),
+            _currentSettings.AutoUpdateEnabled,
+            v =>
+            {
+                _currentSettings.AutoUpdateEnabled = v;
+                SaveSettings();
+                if (v)
+                    _updateService?.StartAutomaticCheck();
+            },
+            "General.AutoUpdate"));
         AddStackRow(stack, CreateToggleSetting(
             _locService.GetString("Settings_Sound", "Enable sound notifications"),
             _currentSettings.SoundEnabled,
@@ -2179,7 +2201,149 @@ public class SettingsForm : Form
             }
         };
 
-        int diagnosticsY = Math.Max(picLogo.Bottom, linkGitHub.Bottom) + 20;
+        Panel? updatePanel = null;
+        if (_updateService != null)
+        {
+            updatePanel = new Panel
+            {
+                Location = new Point(120, linkGitHub.Bottom + 14),
+                Width = 780,
+                Height = 82,
+                BackColor = Color.Transparent,
+                AccessibleName = "About.Update"
+            };
+            var updateLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 3,
+                RowCount = 2,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty,
+                BackColor = Color.Transparent
+            };
+            updateLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            updateLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150F));
+            updateLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190F));
+            updateLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
+            updateLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
+
+            var lblUpdateTitle = new Label
+            {
+                Text = _locService.GetString("Settings_Updates", "Updates"),
+                ForeColor = _textColor,
+                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Margin = Padding.Empty
+            };
+            var lblUpdateStatus = new Label
+            {
+                ForeColor = Color.Gray,
+                Font = new Font("Segoe UI", 9F),
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft,
+                AutoEllipsis = true,
+                AccessibleName = "About.Update.Status"
+            };
+            var btnCheckUpdate = new Button
+            {
+                Text = _locService.GetString("Settings_CheckUpdates", "Check now"),
+                Dock = DockStyle.Fill,
+                Margin = new Padding(4),
+                BackColor = _accentColor,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                AccessibleName = "About.Update.Check"
+            };
+            btnCheckUpdate.FlatAppearance.BorderSize = 0;
+            var btnInstallUpdate = new Button
+            {
+                Text = _locService.GetString("Settings_RestartToUpdate", "Restart and update"),
+                Dock = DockStyle.Fill,
+                Margin = new Padding(4),
+                BackColor = _accentColor,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                AccessibleName = "About.Update.Install",
+                Visible = false
+            };
+            btnInstallUpdate.FlatAppearance.BorderSize = 0;
+
+            string UpdateStatusText(AppUpdateState state) => state.Status switch
+            {
+                AppUpdateStatus.Checking => _locService.GetString(
+                    "Settings_UpdateChecking", "Checking for updates…"),
+                AppUpdateStatus.Downloading => string.Format(
+                    _locService.GetString(
+                        "Settings_UpdateDownloading",
+                        "Downloading {0}: {1}%"),
+                    state.Version,
+                    state.ProgressPercent),
+                AppUpdateStatus.ReadyToInstall => string.Format(
+                    _locService.GetString(
+                        "Settings_UpdateReady",
+                        "Version {0} is ready to install."),
+                    state.Version),
+                AppUpdateStatus.Installing => _locService.GetString(
+                    "Settings_UpdateInstalling", "Preparing to restart…"),
+                AppUpdateStatus.UpToDate => _locService.GetString(
+                    "Settings_UpdateCurrent", "You have the latest stable version."),
+                AppUpdateStatus.Failed => _locService.GetString(
+                    "Settings_UpdateFailed", "Update check failed. You can retry."),
+                _ => _locService.GetString(
+                    "Settings_UpdateIdle", "Stable updates are verified before installation.")
+            };
+
+            void RenderUpdateState(AppUpdateState state)
+            {
+                if (IsDisposed) return;
+                lblUpdateStatus.Text = UpdateStatusText(state);
+                var busy = state.Status is AppUpdateStatus.Checking or AppUpdateStatus.Downloading or
+                    AppUpdateStatus.Installing;
+                btnCheckUpdate.Enabled = !busy;
+                btnInstallUpdate.Visible = state.Status == AppUpdateStatus.ReadyToInstall;
+                btnInstallUpdate.Enabled = state.Status == AppUpdateStatus.ReadyToInstall;
+            }
+
+            EventHandler<AppUpdateState>? updateHandler = null;
+            updateHandler = (_, state) =>
+            {
+                if (IsDisposed || Disposing) return;
+                try
+                {
+                    if (InvokeRequired)
+                        BeginInvoke(() => RenderUpdateState(state));
+                    else
+                        RenderUpdateState(state);
+                }
+                catch (InvalidOperationException)
+                {
+                }
+            };
+            _updateService.StateChanged += updateHandler;
+            FormClosed += (_, _) => _updateService.StateChanged -= updateHandler;
+            btnCheckUpdate.Click += async (_, _) =>
+                await _updateService.CheckAndDownloadAsync(
+                    force: true,
+                    cancellationToken: _lifetimeCancellation.Token);
+            btnInstallUpdate.Click += (_, _) =>
+            {
+                if (_updateService.TryStartInstaller())
+                    Application.Exit();
+            };
+
+            updateLayout.Controls.Add(lblUpdateTitle, 0, 0);
+            updateLayout.SetColumnSpan(lblUpdateTitle, 3);
+            updateLayout.Controls.Add(lblUpdateStatus, 0, 1);
+            updateLayout.Controls.Add(btnCheckUpdate, 1, 1);
+            updateLayout.Controls.Add(btnInstallUpdate, 2, 1);
+            updatePanel.Controls.Add(updateLayout);
+            RenderUpdateState(_updateService.State);
+        }
+
+        int diagnosticsY = Math.Max(
+            picLogo.Bottom,
+            updatePanel?.Bottom ?? linkGitHub.Bottom) + 20;
         var lblDiagnostics = new Label
         {
             Text = _locService.GetString("Settings_DiagnosticsReport", "Safe diagnostic report"),
@@ -2254,6 +2418,8 @@ public class SettingsForm : Form
         pnl.Controls.Add(picLogo);
         pnl.Controls.Add(lblDesc);
         pnl.Controls.Add(linkGitHub);
+        if (updatePanel != null)
+            pnl.Controls.Add(updatePanel);
         pnl.Controls.Add(lblDiagnostics);
         pnl.Controls.Add(lblDiagnosticsPrivacy);
         pnl.Controls.Add(txtDiagnostics);

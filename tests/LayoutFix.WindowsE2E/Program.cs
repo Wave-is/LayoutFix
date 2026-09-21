@@ -118,6 +118,8 @@ internal static class Program
                     expectSessionRecovery: false)
                 .GetAwaiter()
                 .GetResult();
+        if (args.Length >= 2 && args[0] == "--portable-update-test")
+            return RunPortableUpdateTestAsync(args[1]).GetAwaiter().GetResult();
         if (args.Length >= 2 && args[0] == "--startup-recovery-test")
             return RunStartupLifecycleTestWithRetriesAsync(
                     args[1],
@@ -2621,7 +2623,8 @@ internal static class Program
                 logger,
                 modelDownloadService,
                 historyService,
-                new InMemoryTranslationCredentialStore());
+                new InMemoryTranslationCredentialStore(),
+                new StubUpdateService());
 
             form.Shown += (_, _) => form.Close();
             Application.Run(form);
@@ -3272,6 +3275,93 @@ internal static class Program
         suggestion.TargetLayoutCode == "ru-RU" &&
         suggestion.IsConfidentForAutomaticCorrection;
 
+    private static async Task<int> RunPortableUpdateTestAsync(string applicationPath)
+    {
+        var sourceExecutable = Path.GetFullPath(applicationPath);
+        var sourceDirectory = Path.GetDirectoryName(sourceExecutable);
+        var productVersion = FileVersionInfo.GetVersionInfo(sourceExecutable).ProductVersion;
+        if (sourceDirectory == null ||
+            !File.Exists(sourceExecutable) ||
+            !ReleaseVersion.TryParse(productVersion, out var expectedVersion))
+        {
+            Console.Error.WriteLine("Portable update E2E received an invalid application build.");
+            return 169;
+        }
+
+        var testRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"LayoutFix.PortableUpdateE2E.{Guid.NewGuid():N}");
+        var installDirectory = Path.Combine(testRoot, "installed");
+        var payloadDirectory = Path.Combine(testRoot, "payload");
+        var resultPath = Path.Combine(testRoot, "update-result.json");
+        try
+        {
+            Directory.CreateDirectory(installDirectory);
+            File.WriteAllText(Path.Combine(installDirectory, "old-version.marker"), "old");
+            CopyDirectoryForPortableUpdateTest(sourceDirectory, payloadDirectory);
+
+            var exitCode = await AppUpdateInstaller.RunForTestAsync(
+                installDirectory,
+                payloadDirectory,
+                expectedVersion,
+                resultPath);
+            var installedExecutable = Path.Combine(installDirectory, "LayoutFix.exe");
+            if (exitCode != 0 ||
+                !File.Exists(installedExecutable) ||
+                File.Exists(Path.Combine(installDirectory, "old-version.marker")) ||
+                !File.Exists(resultPath) ||
+                !File.ReadAllText(resultPath).Contains(
+                    "\"status\":\"success\"",
+                    StringComparison.Ordinal))
+            {
+                Console.Error.WriteLine("Portable update E2E did not publish a verified replacement.");
+                return 170;
+            }
+
+            Console.WriteLine(
+                $"portable_update=pass version={expectedVersion} transaction=pass smoke=pass rollback_ready=pass");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine(
+                $"Portable update E2E failed: {exception.GetType().Name}.");
+            return 171;
+        }
+        finally
+        {
+            try { Directory.Delete(testRoot, recursive: true); }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
+    }
+
+    private static void CopyDirectoryForPortableUpdateTest(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var directory in Directory.EnumerateDirectories(
+                     source,
+                     "*",
+                     SearchOption.AllDirectories))
+        {
+            Directory.CreateDirectory(Path.Combine(
+                destination,
+                Path.GetRelativePath(source, directory)));
+        }
+
+        foreach (var file in Directory.EnumerateFiles(
+                     source,
+                     "*",
+                     SearchOption.AllDirectories))
+        {
+            var target = Path.Combine(destination, Path.GetRelativePath(source, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(file, target, overwrite: false);
+        }
+    }
+
     private static async Task<int> RunStartupLifecycleTestWithRetriesAsync(
         string applicationPath,
         bool expectHookFailureRecovery,
@@ -3667,7 +3757,8 @@ internal static class Program
             logger,
             modelDownloadService,
             historyService,
-            new InMemoryTranslationCredentialStore());
+            new InMemoryTranslationCredentialStore(),
+            new StubUpdateService());
         if (manualScale is > 1F and <= 3F)
             form.Scale(new SizeF(manualScale, manualScale));
         var result = 1;
@@ -3749,6 +3840,9 @@ internal static class Program
                     {
                         localization.GetString("Settings_AutoConv", "Enable automatic correction while typing"),
                         localization.GetString("Settings_AutoStart", "Start with Windows"),
+                        localization.GetString(
+                            "Settings_AutoUpdate",
+                            "Automatically download stable updates"),
                         localization.GetString("Settings_Sound", "Enable sound notifications"),
                         localization.GetString("Settings_Notifications", "Show diagnostic popup messages (LF-... codes)"),
                         localization.GetString("Settings_Flags", "Use country flags in tray"),
@@ -3828,6 +3922,28 @@ internal static class Program
                     {
                         throw new InvalidOperationException("The localized interface language label is missing.");
                     }
+                }
+
+                if (tabName.Equals("About", StringComparison.OrdinalIgnoreCase))
+                {
+                    var updatePanel = Descendants(form)
+                        .SingleOrDefault(control =>
+                            control.Visible && control.AccessibleName == "About.Update");
+                    var updateStatus = updatePanel == null
+                        ? null
+                        : Descendants(updatePanel).SingleOrDefault(control =>
+                            control.Visible && control.AccessibleName == "About.Update.Status");
+                    var updateCheck = updatePanel == null
+                        ? null
+                        : Descendants(updatePanel).SingleOrDefault(control =>
+                            control.Visible && control.AccessibleName == "About.Update.Check");
+                    if (updatePanel == null || updateStatus == null || updateCheck == null)
+                        throw new InvalidOperationException("The About update controls are incomplete.");
+
+                    var statusBounds = updateStatus.RectangleToScreen(updateStatus.ClientRectangle);
+                    var checkBounds = updateCheck.RectangleToScreen(updateCheck.ClientRectangle);
+                    if (statusBounds.Right > checkBounds.Left)
+                        throw new InvalidOperationException("The About update controls overlap.");
                 }
 
                 if (tabName.Equals("Languages", StringComparison.OrdinalIgnoreCase))
@@ -4093,6 +4209,29 @@ internal static class Program
                     }
                 }
                 bitmap.Save(fullOutputPath, System.Drawing.Imaging.ImageFormat.Png);
+                foreach (var bounds in sidebarBounds)
+                {
+                    var paintedPixels = 0;
+                    for (var y = Math.Max(0, bounds.Top); y < Math.Min(bitmap.Height, bounds.Bottom); y++)
+                    {
+                        for (var x = Math.Max(0, bounds.Left); x < Math.Min(bitmap.Width, bounds.Right); x++)
+                        {
+                            var pixel = bitmap.GetPixel(x, y);
+                            if (Math.Abs(pixel.R - 35) + Math.Abs(pixel.G - 35) +
+                                Math.Abs(pixel.B - 38) > 45)
+                            {
+                                paintedPixels++;
+                            }
+                        }
+                    }
+
+                    if (paintedPixels < 20)
+                    {
+                        throw new InvalidOperationException(
+                            $"{tabName} sidebar button at {bounds} was not painted.");
+                    }
+                }
+
                 var unexpectedTopBarPixels = 0;
                 for (var y = 2; y < Math.Min(38, bitmap.Height); y++)
                 {
@@ -4160,7 +4299,8 @@ internal static class Program
                 logger,
                 modelDownloadService,
                 historyService,
-                new InMemoryTranslationCredentialStore());
+                new InMemoryTranslationCredentialStore(),
+                new StubUpdateService());
             form.Text = "LayoutFix visual QA";
             Application.Run(form);
             return 0;
@@ -7552,6 +7692,22 @@ internal static class Program
         string Id,
         string Input,
         string Expected);
+
+    private sealed class StubUpdateService : IAppUpdateService
+    {
+        public AppUpdateState State { get; private set; } = new(AppUpdateStatus.Idle);
+        public event EventHandler<AppUpdateState>? StateChanged;
+        public void StartAutomaticCheck() { }
+        public Task CheckAndDownloadAsync(
+            bool force = false,
+            CancellationToken cancellationToken = default)
+        {
+            State = new AppUpdateState(AppUpdateStatus.UpToDate, "1.0.23");
+            StateChanged?.Invoke(this, State);
+            return Task.CompletedTask;
+        }
+        public bool TryStartInstaller() => false;
+    }
 
     private sealed class E2ENullLogger : ILoggerService
     {
