@@ -10,6 +10,55 @@ public class WindowsTextTargetGuardTests
     private static readonly ActiveWindowContext Context = new((nint)1, (nint)2, 3);
 
     [Theory]
+    [InlineData("Chrome_WidgetWin_1", true, true, true, true)]
+    [InlineData("Photoshop", true, true, true, false)]
+    [InlineData("Chrome_WidgetWin_1", false, true, true, false)]
+    [InlineData("Chrome_WidgetWin_1", true, false, true, false)]
+    [InlineData("Chrome_WidgetWin_1", true, true, false, false)]
+    public void ChromiumGroup_CandidateRequiresExactBrowserProcessTypeAndFocus(
+        string windowClass, bool processMatch, bool group, bool focused, bool expected)
+    {
+        Assert.Equal(expected, WindowsTextTargetGuard.IsChromiumGroupCandidate(
+            windowClass, processMatch, group, focused));
+    }
+
+    [Theory]
+    [InlineData(false, false, 1, true)]
+    [InlineData(true, false, 1, false)]
+    [InlineData(false, true, 1, false)]
+    [InlineData(null, false, 1, false)]
+    [InlineData(false, null, 1, false)]
+    [InlineData(false, false, 0, false)]
+    [InlineData(false, false, 2, false)]
+    public void ChromiumGroup_RequiresExplicitWritableDocumentAndSingleWritableRange(
+        bool? documentReadOnly, bool? selectionReadOnly, int count, bool expected)
+    {
+        Assert.Equal(expected, WindowsTextTargetGuard.IsWritableChromiumGroupRange(
+            documentReadOnly, selectionReadOnly, count));
+    }
+
+    [Fact]
+    public void ChromiumGroup_RejectsUnsupportedAndMixedAttributes()
+    {
+        Assert.False(WindowsTextTargetGuard.IsWritableChromiumGroupRange(new object(), false, 1));
+        Assert.False(WindowsTextTargetGuard.IsWritableChromiumGroupRange(false, new object(), 1));
+    }
+
+    [Theory]
+    [InlineData(true, true, false, true, true, true)]
+    [InlineData(true, true, false, true, false, false)]
+    [InlineData(true, true, false, false, true, false)]
+    [InlineData(false, true, false, true, true, false)]
+    [InlineData(true, false, false, true, true, false)]
+    [InlineData(true, true, true, true, true, false)]
+    public void VerifiedGroup_StillRequiresEnabledFocusableNonPasswordTextTarget(
+        bool enabled, bool focusable, bool password, bool textPattern, bool verified, bool expected)
+    {
+        Assert.Equal(expected, WindowsTextTargetGuard.IsEditableAutomationTarget(
+            enabled, focusable, password, false, false, textPattern, verified));
+    }
+
+    [Theory]
     [InlineData(true, true, false, true, false, false, true)]
     [InlineData(true, true, false, false, true, true, true)]
     [InlineData(true, true, true, true, true, true, false)]

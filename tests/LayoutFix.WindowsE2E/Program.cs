@@ -285,7 +285,7 @@ internal static class Program
         {
             browserKind = args[0] == "--chrome-test" ? "chrome" : "edge";
             browserTargetKind = args[1].ToLowerInvariant();
-            if (browserTargetKind is not ("input" or "textarea" or "contenteditable"))
+            if (browserTargetKind is not ("input" or "textarea" or "contenteditable" or "group" or "readonlygroup"))
                 return 64;
             foreach (var browserMode in args.Skip(2))
             {
@@ -562,6 +562,21 @@ internal static class Program
 
                 originalClipboard = await clipboard.CaptureAsync();
                 AppendResult("clipboard:captured");
+                if (browserTargetKind == "readonlygroup")
+                {
+                    await SetClipboardSentinelAsync();
+                    SendExternalSelectAll();
+                    await Task.Delay(100);
+                    SendExternalHotkey(configuredHotkey, configuredHotkeyVirtualKey);
+                    await Task.Delay(1_000);
+                    logger.Flush();
+                    var rejected = File.ReadAllText(logPath).Contains("DiagnosticCode: LF-HK-004", StringComparison.Ordinal);
+                    var unchanged = browserHost!.TryReadTargetText(out var readOnlyText) && readOnlyText.TrimEnd('\r', '\n') == "TEST";
+                    var clipboardUnchanged = await clipboard.ReadTextAsync() == ClipboardSentinel;
+                    AppendResult($"browser-readonly:rejected={rejected};unchanged={unchanged};clipboardPreserved={clipboardUnchanged}");
+                    _exitCode = rejected && unchanged && clipboardUnchanged ? 0 : 90;
+                    return;
+                }
                 var browserManualCase = browserNoOpSiblingLayoutTest
                     ? new ManualCorrectionCase("no-op-sibling", "просто", "ghjcnj")
                     : new ManualCorrectionCase("default", "ghbdtn", "привет");
@@ -1015,7 +1030,7 @@ internal static class Program
                     _exitCode = 87;
                 }
 
-                if (browserHost != null)
+                if (browserHost != null && browserTargetKind != "readonlygroup")
                 {
                     var timingMatch = Regex.Match(
                         logText,
@@ -1443,9 +1458,11 @@ internal static class Program
                 "input" => "<input id=\"target\" aria-label=\"LayoutFix input target\" autofocus value=\"TEST\">",
                 "textarea" => "<textarea id=\"target\" aria-label=\"LayoutFix textarea target\" autofocus>TEST</textarea>",
                 "contenteditable" => "<div id=\"target\" role=\"textbox\" aria-label=\"LayoutFix contenteditable target\" contenteditable=\"true\">TEST</div>",
+                "group" => "<div id=\"target\" role=\"group\" aria-label=\"LayoutFix group editor target\" contenteditable=\"true\">TEST</div>",
+                "readonlygroup" => "<div id=\"target\" role=\"group\" tabindex=\"0\" aria-label=\"LayoutFix read-only group target\">TEST</div>",
                 _ => throw new ArgumentOutOfRangeException(nameof(targetKind))
             };
-            var selectScript = targetKind == "contenteditable"
+            var selectScript = targetKind is "contenteditable" or "group" or "readonlygroup"
                 ? selectText
                     ? "const r=document.createRange();r.selectNodeContents(t);const s=getSelection();s.removeAllRanges();s.addRange(r);"
                     : "const r=document.createRange();r.selectNodeContents(t);r.collapse(false);const s=getSelection();s.removeAllRanges();s.addRange(r);"
@@ -1466,7 +1483,7 @@ internal static class Program
                   <script>
                     addEventListener('load',()=>{
                       const t=document.getElementById('target');
-                      const value=()=>t.isContentEditable?t.textContent:t.value;
+                      const value=()=>t.tagName==='DIV'?t.textContent:t.value;
                       const report=()=>document.title='LayoutFix {{browserName}} E2E {{targetKind}}|value='+encodeURIComponent(value());
                       const activate=()=>{t.focus();{{selectScript}}};
                       t.addEventListener('input',report);

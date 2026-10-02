@@ -1,4 +1,5 @@
 using System.Windows.Automation;
+using System.Windows.Automation.Text;
 using System.Text;
 using System.Diagnostics;
 using LayoutFix.Core.Interfaces;
@@ -508,20 +509,23 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
         }
 
         // Browser contenteditable and document-style editors commonly expose
-        // TextPattern rather than ValuePattern. Limit this fallback to actual
-        // Edit/Document controls so buttons, panes and Adobe canvases fail closed
-        // before the clipboard transaction starts.
+        // TextPattern rather than ValuePattern. Edit/Document are the usual
+        // shapes; Chromium Group editors require the explicit writable-range
+        // probe below. Buttons, unrelated panes and Adobe canvases fail closed.
         var isEditOrDocument = current.ControlType is not null &&
             (current.ControlType == ControlType.Edit ||
              current.ControlType == ControlType.Document);
-        var hasTextPattern = element.TryGetCurrentPattern(TextPattern.Pattern, out _);
+        var hasTextPattern = element.TryGetCurrentPattern(TextPattern.Pattern, out var textPatternObject);
+        var writableGroup = ProbeWritableChromiumGroup(
+            context, current, textPatternObject as TextPattern, logger, diagnosticsEnabled, out _);
         var accepted = IsEditableAutomationTarget(
             current.IsEnabled,
             current.IsKeyboardFocusable,
             current.IsPassword,
             hasWritableValuePattern,
             isEditOrDocument,
-            hasTextPattern);
+            hasTextPattern,
+            writableGroup);
         LogAutomationDiagnostic(
             logger,
             diagnosticsEnabled,
@@ -539,11 +543,68 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
         bool isPassword,
         bool hasWritableValuePattern,
         bool isEditOrDocument,
-        bool hasTextPattern) =>
+        bool hasTextPattern,
+        bool hasVerifiedWritableGroup = false) =>
         isEnabled &&
         isKeyboardFocusable &&
         !isPassword &&
-        (hasWritableValuePattern || (isEditOrDocument && hasTextPattern));
+        (hasWritableValuePattern || (isEditOrDocument && hasTextPattern) ||
+         (hasVerifiedWritableGroup && hasTextPattern));
+
+    private static bool ProbeWritableChromiumGroup(
+        ActiveWindowContext context,
+        AutomationElement.AutomationElementInformation current,
+        TextPattern? textPattern,
+        ILoggerService? logger,
+        Func<bool>? diagnosticsEnabled,
+        out TextPatternRange? verifiedSelection)
+    {
+        // TextPattern alone does not prove editability. Chromium also exposes it
+        // on ordinary page groups; require explicitly writable text ranges.
+        verifiedSelection = null;
+        if (current.ControlType != ControlType.Group || textPattern == null ||
+            !current.IsEnabled || !current.IsKeyboardFocusable ||
+            !current.HasKeyboardFocus || current.IsPassword ||
+            !IsChromiumGroupCandidate(WindowClass(context.ForegroundWindow),
+                current.ProcessId == context.ProcessId, true, current.HasKeyboardFocus))
+            return false;
+
+        try
+        {
+            var selections = textPattern.GetSelection();
+            var documentReadOnly = textPattern.DocumentRange.GetAttributeValue(TextPattern.IsReadOnlyAttribute);
+            var selectionReadOnly = selections.Length == 1
+                ? selections[0].GetAttributeValue(TextPattern.IsReadOnlyAttribute)
+                : null;
+            var accepted = IsWritableChromiumGroupRange(
+                documentReadOnly, selectionReadOnly, selections.Length);
+            if (accepted)
+                verifiedSelection = selections[0];
+            LogAutomationDiagnostic(logger, diagnosticsEnabled,
+                $"GroupRangeProbe=True; DocumentReadOnly={DescribeReadOnlyAttribute(documentReadOnly)}; " +
+                $"SelectionReadOnly={DescribeReadOnlyAttribute(selectionReadOnly)}; " +
+                $"SelectionCount={selections.Length}; WritableGroup={accepted}");
+            return accepted;
+        }
+        catch (Exception exception)
+        {
+            LogAutomationDiagnostic(logger, diagnosticsEnabled,
+                $"GroupRangeProbe=True; WritableGroup=False; ExceptionType={DiagnosticValue(exception.GetType().FullName)}");
+            return false;
+        }
+    }
+
+    internal static bool IsWritableChromiumGroupRange(
+        object? documentReadOnly, object? selectionReadOnly, int selectionCount) =>
+        selectionCount == 1 && documentReadOnly is false && selectionReadOnly is false;
+
+    internal static bool IsChromiumGroupCandidate(
+        string foregroundClass, bool processMatch, bool isGroup, bool hasKeyboardFocus) =>
+        processMatch && isGroup && hasKeyboardFocus &&
+        string.Equals(foregroundClass, "Chrome_WidgetWin_1", StringComparison.Ordinal);
+
+    private static string DescribeReadOnlyAttribute(object? value) =>
+        value is bool readOnly ? readOnly.ToString() : "unknown-or-mixed";
 
     private static bool ProbeChromiumRootPane(ActiveWindowContext context)
     {
@@ -703,13 +764,16 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
         var hasTextPattern = element.TryGetCurrentPattern(
             TextPattern.Pattern,
             out var patternObject);
+        var writableGroup = ProbeWritableChromiumGroup(
+            context, current, patternObject as TextPattern, logger, diagnosticsEnabled, out var verifiedGroupSelection);
         var editable = IsEditableAutomationTarget(
             current.IsEnabled,
             current.IsKeyboardFocusable,
             current.IsPassword,
             hasWritableValuePattern,
             isEditOrDocument,
-            hasTextPattern);
+            hasTextPattern,
+            writableGroup);
         LogAutomationDiagnostic(
             logger,
             diagnosticsEnabled,
@@ -720,6 +784,11 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
             $"TextPattern={hasTextPattern}; Editable={editable}; CombinedSelectionProbe=True");
         if (!editable || patternObject is not TextPattern textPattern)
             return TextSelectionReadResult.Unsupported;
+
+        // Read the same range whose attributes were verified, not a second
+        // potentially changed selection. This also avoids another UIA round trip.
+        if (verifiedGroupSelection != null)
+            return TextSelectionReadResult.Verified(verifiedGroupSelection.GetText(-1));
 
         var selections = textPattern.GetSelection();
         return selections.Length == 1

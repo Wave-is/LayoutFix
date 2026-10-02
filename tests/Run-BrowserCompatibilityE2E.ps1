@@ -30,6 +30,8 @@ if (-not (Test-Path $harness)) {
 }
 
 $observedLatencies = [Collections.Generic.List[int]]::new()
+$evidenceRoot = Join-Path $repoRoot ('artifacts\qa\browser-' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss'))
+New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
 $observedActionLatencies = [Collections.Generic.List[int]]::new()
 function Record-BrowserLatency {
     param([Parameter(Mandatory)][string]$Case)
@@ -53,6 +55,7 @@ function Record-BrowserLatency {
     $actionElapsed = [int]$actionMatch.Groups['elapsed'].Value
     $observedActionLatencies.Add($actionElapsed)
     Write-Output "browser_latency case=$Case visibleMs=$elapsed actionMs=$actionElapsed"
+    Copy-Item -LiteralPath $resultPath -Destination (Join-Path $evidenceRoot "$Case-$($observedLatencies.Count).log")
 }
 
 $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
@@ -104,7 +107,7 @@ function Remove-IsolatedBrowserProfiles {
 $maximumAttempts = 1
 Remove-IsolatedBrowserProfiles
 foreach ($browser in @('edge', 'chrome')) {
-    foreach ($target in @('input', 'textarea', 'contenteditable')) {
+    foreach ($target in @('input', 'textarea', 'contenteditable', 'group')) {
         for ($iteration = 1; $iteration -le $Runs; $iteration++) {
             for ($attempt = 1; $attempt -le $maximumAttempts; $attempt++) {
                 if (Test-Path $resultPath) {
@@ -181,7 +184,7 @@ for ($iteration = 1; $iteration -le $Runs; $iteration++) {
 # The primary Scroll Lock workflow must also correct the previous word when
 # there is no selection. This used to spend three 750 ms clipboard timeouts
 # before even attempting the fallback, which made one press look unreliable.
-foreach ($target in @('input', 'textarea', 'contenteditable')) {
+foreach ($target in @('input', 'textarea', 'contenteditable', 'group')) {
     for ($iteration = 1; $iteration -le $Runs; $iteration++) {
         if (Test-Path $resultPath) {
             Remove-Item -LiteralPath $resultPath -Force
@@ -265,6 +268,30 @@ foreach ($siblingCase in $siblingCases) {
         Remove-IsolatedBrowserProfiles
     }
 }
+
+# Group editors must work while Shift is held too; page groups must not be
+# mistaken for editable controls just because they have a text selection.
+foreach ($iteration in 1..$Runs) {
+    foreach ($mode in @('holdshift', 'duplicate')) {
+        & $harness '--chrome-test' 'group' $mode
+        if ($LASTEXITCODE -ne 0) {
+            throw "Chrome group $mode failed on first press: $(Get-Content $resultPath -Raw)"
+        }
+        Record-BrowserLatency "chrome-group-$mode"
+        Remove-IsolatedBrowserProfiles
+    }
+    foreach ($browser in @('edge', 'chrome')) {
+        & $harness "--$browser-test" 'readonlygroup'
+        $details = Get-Content -LiteralPath $resultPath -Raw
+        if ($LASTEXITCODE -ne 0 -or -not $details.Contains('browser-readonly:rejected=True;unchanged=True;clipboardPreserved=True')) {
+            throw "$browser read-only group was not safely rejected: $details"
+        }
+        Copy-Item -LiteralPath $resultPath -Destination (Join-Path $evidenceRoot "$browser-readonly-group-$iteration.log")
+        Write-Output "browser_readonly case=$browser-group preserved=True"
+        Remove-IsolatedBrowserProfiles
+    }
+}
+Write-Output "browser_evidence path=$evidenceRoot"
 
 $profileLeaks = @(
     Get-ChildItem `
