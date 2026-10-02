@@ -560,17 +560,38 @@ internal static class Program
                 if (hasExternalTarget)
                     AppendFocusedElementDiagnostics(activeWindow.CaptureActiveWindow());
 
+                if (browserHost != null && Win32.GetForegroundWindow() != targetWindow)
+                    throw new InvalidOperationException("The isolated browser lost foreground focus; no test input was sent.");
+
                 originalClipboard = await clipboard.CaptureAsync();
                 AppendResult("clipboard:captured");
                 if (browserTargetKind == "readonlygroup")
                 {
+                    var readOnlyContext = activeWindow.CaptureActiveWindow();
+                    var readOnlyElement = AutomationElement.FocusedElement;
+                    if (readOnlyElement == null ||
+                        readOnlyElement.Current.ProcessId != readOnlyContext.ProcessId ||
+                        readOnlyElement.Current.ControlType != ControlType.Group ||
+                        !readOnlyElement.Current.HasKeyboardFocus ||
+                        Win32.GetForegroundWindow() != targetWindow)
+                        throw new InvalidOperationException("The exact isolated read-only Group is not focused; no input was sent.");
                     await SetClipboardSentinelAsync();
-                    SendExternalSelectAll();
-                    await Task.Delay(100);
+                    if (Win32.GetForegroundWindow() != targetWindow)
+                        throw new InvalidOperationException("The read-only browser lost focus before the shortcut; no input was sent.");
                     SendExternalHotkey(configuredHotkey, configuredHotkeyVirtualKey);
-                    await Task.Delay(1_000);
-                    logger.Flush();
-                    var rejected = File.ReadAllText(logPath).Contains("DiagnosticCode: LF-HK-004", StringComparison.Ordinal);
+                    var rejectionDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(6);
+                    string rejectionLog;
+                    do
+                    {
+                        await Task.Delay(25);
+                        // Do not block the WinForms message pump with synchronous
+                        // Flush while the physical action is still running.
+                        try { rejectionLog = File.Exists(logPath) ? File.ReadAllText(logPath) : string.Empty; }
+                        catch (IOException) { rejectionLog = string.Empty; }
+                    } while (!rejectionLog.Contains("Phase=action-timing", StringComparison.Ordinal) &&
+                             DateTime.UtcNow < rejectionDeadline);
+                    var rejected = rejectionLog.Contains("DiagnosticCode: LF-HK-004", StringComparison.Ordinal) &&
+                                   rejectionLog.Contains("Phase=action-timing", StringComparison.Ordinal);
                     var unchanged = browserHost!.TryReadTargetText(out var readOnlyText) && readOnlyText.TrimEnd('\r', '\n') == "TEST";
                     var clipboardUnchanged = await clipboard.ReadTextAsync() == ClipboardSentinel;
                     AppendResult($"browser-readonly:rejected={rejected};unchanged={unchanged};clipboardPreserved={clipboardUnchanged}");

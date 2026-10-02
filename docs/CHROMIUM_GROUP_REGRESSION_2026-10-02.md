@@ -23,6 +23,35 @@ The normal browser compatibility matrix now includes Group editors too.
 
 ## Known verification limitation
 
+Final production-source automated suite: 640/640 passed (221 Core, 252 Windows,
+167 integration). Published portable smoke: exit 0; 27 dictionaries, 22 locales,
+translation worker present, no settings/history/logs/PDBs in the package.
+
+The targeted three-round browser run completed 24 cases: all 18 correction cases
+visibly succeeded on the first press, but three exceeded the 400 ms internal
+latency gate (430, 489 and 427 ms). Five read-only cases rejected correction and
+preserved both text and clipboard. One Edge read-only case lost foreground focus
+and was invalid, not a safety pass. Its log shows a no-change action in the other
+application. The harness now refuses browser input without exact foreground
+ownership, and the negative fixture requires a focused Group before the shortcut.
+Read-only confirmation evidence is kept separately under
+`artifacts/qa/chromium-group-readonly-confirmation`.
+
+The negative harness was also corrected to wait for completion rather than
+sampling diagnostics after exactly one second; this avoids falsely reporting a
+still-running rejection as a safety failure. It tolerates the asynchronous log
+file not existing yet and does not synchronously flush on the WinForms thread
+while waiting. Final exact-focused Chrome and Edge negative tests both passed:
+rejected=True, unchanged=True, clipboardPreserved=True. Evidence:
+`artifacts/qa/chromium-group-readonly-verified/*-message-pump.log`.
+
+The portable payload is available at
+`\\192.168.1.8\ShareAgents\layoutfix\v1.0.24-preview.1`.
+Main executable, app assembly, Infrastructure and Core SHA-256 hashes match the
+local published payload. ProductVersion identifies production-source commit
+`01aa910682ffed5bf58390e540c0af03bb7a31a3`; later commits only harden the test harness
+and document evidence, and do not alter the delivered production code.
+
 The initial expanded broad matrix corrected an ordinary Chrome input on the
 first press in 463 ms, but failed the stricter internal action latency gate:
 449 ms versus 400 ms. This failure is preserved in
