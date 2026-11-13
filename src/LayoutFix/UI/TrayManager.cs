@@ -27,7 +27,6 @@ public class TrayManager : IDisposable
     private ToolStripMenuItem? _autoCorrectionMenuItem;
     private ToolStripMenuItem? _hookStatusMenuItem;
     private ToolStripMenuItem? _updateMenuItem;
-    private string? _notifiedUpdateVersion;
     private bool _updatingMenuState;
     private bool _disposed;
 
@@ -59,7 +58,6 @@ public class TrayManager : IDisposable
         };
 
         _notifyIcon.MouseClick += NotifyIcon_MouseClick;
-        _notifyIcon.BalloonTipClicked += NotifyIcon_BalloonTipClicked;
 
         _layoutTimer = new System.Windows.Forms.Timer { Interval = 300 };
         _layoutTimer.Tick += LayoutTimer_Tick;
@@ -250,26 +248,8 @@ public class TrayManager : IDisposable
         {
             if (_disposed) return;
             UpdateUpdateMenuItem(state);
-            if (state.Status == AppUpdateStatus.ReadyToInstall &&
-                !string.Equals(_notifiedUpdateVersion, state.Version, StringComparison.Ordinal))
-            {
-                _notifiedUpdateVersion = state.Version;
-                _notifyIcon.BalloonTipTitle = _locService.GetString(
-                    "Update_ReadyTitle",
-                    "LayoutFix update is ready");
-                _notifyIcon.BalloonTipText = string.Format(
-                    _locService.GetString(
-                        "Update_ReadyMessage",
-                        "Version {0} was verified and downloaded. Click to restart and install it."),
-                    state.Version);
-                _notifyIcon.BalloonTipIcon = ToolTipIcon.Info;
-                _notifyIcon.ShowBalloonTip(8_000);
-            }
         }, null);
     }
-
-    private void NotifyIcon_BalloonTipClicked(object? sender, EventArgs eventArgs)
-        => ApplyReadyUpdate();
 
     private void UpdateUpdateMenuItem(AppUpdateState state)
     {
@@ -416,7 +396,6 @@ public class TrayManager : IDisposable
         _disposed = true;
         _hookRecoveryCoordinator.OperationalStateChanged -= HookRecovery_OperationalStateChanged;
         _updateService.StateChanged -= UpdateService_StateChanged;
-        _notifyIcon.BalloonTipClicked -= NotifyIcon_BalloonTipClicked;
         _layoutTimer.Stop();
         _layoutTimer.Dispose();
         _notifyIcon.Visible = false;
