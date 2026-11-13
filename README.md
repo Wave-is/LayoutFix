@@ -1,6 +1,6 @@
 <div align="center">
   <img src="assets/logo.png" alt="LayoutFix Logo" width="128" />
-  <h1>LayoutFix v1.0.24</h1>
+  <h1>LayoutFix v1.0.25</h1>
   <p><b>A safety-first Windows keyboard-layout fixer and text translator.</b></p>
   <p>
     <a href="#english">English</a> •
@@ -50,7 +50,7 @@ A lightweight, powerful Windows background utility designed to solve common typi
 
 The first updater-enabled release must be installed manually over an older build. After that one-time bootstrap, future stable releases can be downloaded and applied inside LayoutFix.
 
-> **Unsigned installer notice:** the v1.0.24 installer is intentionally distributed without an Authenticode signature, so Windows SmartScreen may show an unknown-publisher warning. Install it only after verifying the checksum. Automatic correction remains disabled by default.
+> **Unsigned installer notice:** the v1.0.25 installer is intentionally distributed without an Authenticode signature, so Windows SmartScreen may show an unknown-publisher warning. Install it only after verifying the checksum. Automatic correction remains disabled by default.
 
 ---
 
@@ -91,7 +91,7 @@ The first updater-enabled release must be installed manually over an older build
 
 Первую версию со встроенным обновлятором нужно один раз установить вручную поверх старой. После этого следующие стабильные релизы можно скачивать и применять прямо внутри LayoutFix.
 
-> **Неподписанный установщик:** v1.0.24 намеренно распространяется без подписи Authenticode, поэтому Windows SmartScreen может показать предупреждение о неизвестном издателе. Устанавливайте его только после проверки контрольной суммы. Автоисправление по умолчанию выключено.
+> **Неподписанный установщик:** v1.0.25 намеренно распространяется без подписи Authenticode, поэтому Windows SmartScreen может показать предупреждение о неизвестном издателе. Устанавливайте его только после проверки контрольной суммы. Автоисправление по умолчанию выключено.
 
 ---
 
@@ -130,7 +130,7 @@ The first updater-enabled release must be installed manually over an older build
 
 Першу версію з вбудованим оновлювачем потрібно один раз встановити вручну поверх старої. Після цього наступні стабільні релізи можна завантажувати й застосовувати безпосередньо в LayoutFix.
 
-> **Непідписаний інсталятор:** v1.0.24 навмисно поширюється без підпису Authenticode, тому Windows SmartScreen може показати попередження про невідомого видавця. Встановлюйте його лише після перевірки контрольної суми. Автовиправлення типово вимкнене.
+> **Непідписаний інсталятор:** v1.0.25 навмисно поширюється без підпису Authenticode, тому Windows SmartScreen може показати попередження про невідомого видавця. Встановлюйте його лише після перевірки контрольної суми. Автовиправлення типово вимкнене.
 
 ---
 

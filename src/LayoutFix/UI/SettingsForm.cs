@@ -2141,6 +2141,7 @@ public class SettingsForm : Form
         var pnl = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
 
         var lblTitle = new Label { Text = _locService.GetString("Settings_About", "About LayoutFix"), ForeColor = _textColor, Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Location = new Point(0, 0) };
+        var secondary = _textColor == Color.White ? Color.Silver : Color.FromArgb(65, 65, 65);
 
         var picLogo = new PictureBox
         {
@@ -2165,7 +2166,7 @@ public class SettingsForm : Form
             Text = $"LayoutFix v{version}\n" +
                 _locService.GetString("Settings_BuiltWith", "Built with .NET 8.") + "\n" +
                 _locService.GetString("Settings_AboutTagline", "Automatic keyboard layout correction and translation."),
-            ForeColor = Color.Gray,
+            ForeColor = secondary,
             Font = new Font("Segoe UI", 12),
             AutoSize = true,
             Location = new Point(120, 50)
@@ -2204,14 +2205,6 @@ public class SettingsForm : Form
         Panel? updatePanel = null;
         if (_updateService != null)
         {
-            updatePanel = new Panel
-            {
-                Location = new Point(120, linkGitHub.Bottom + 14),
-                Width = 780,
-                Height = 82,
-                BackColor = Color.Transparent,
-                AccessibleName = "About.Update"
-            };
             var updateLayout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -2222,14 +2215,20 @@ public class SettingsForm : Form
                 BackColor = Color.Transparent
             };
             updateLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            updateLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150F));
-            updateLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190F));
-            updateLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
-            updateLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
+            updateLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            updateLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            updateLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            updateLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            updatePanel = updateLayout;
+            updateLayout.AccessibleName = "About.Update";
+            updateLayout.AutoSize = true;
+            updateLayout.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            updateLayout.Dock = DockStyle.None;
 
             var lblUpdateTitle = new Label
             {
                 Text = _locService.GetString("Settings_Updates", "Updates"),
+                AutoSize = true,
                 ForeColor = _textColor,
                 Font = new Font("Segoe UI", 11F, FontStyle.Bold),
                 Dock = DockStyle.Fill,
@@ -2238,7 +2237,7 @@ public class SettingsForm : Form
             };
             var lblUpdateStatus = new Label
             {
-                ForeColor = Color.Gray,
+                ForeColor = secondary,
                 Font = new Font("Segoe UI", 9F),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleLeft,
@@ -2256,6 +2255,11 @@ public class SettingsForm : Form
                 AccessibleName = "About.Update.Check"
             };
             btnCheckUpdate.FlatAppearance.BorderSize = 0;
+            btnCheckUpdate.AutoSize = true;
+            btnCheckUpdate.Dock = DockStyle.None;
+            btnCheckUpdate.Anchor = AnchorStyles.Left;
+            btnCheckUpdate.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            btnCheckUpdate.Padding = new Padding(8, 2, 8, 2);
             var btnInstallUpdate = new Button
             {
                 Text = _locService.GetString("Settings_RestartToUpdate", "Restart and update"),
@@ -2268,6 +2272,11 @@ public class SettingsForm : Form
                 Visible = false
             };
             btnInstallUpdate.FlatAppearance.BorderSize = 0;
+            btnInstallUpdate.AutoSize = true;
+            btnInstallUpdate.Dock = DockStyle.None;
+            btnInstallUpdate.Anchor = AnchorStyles.Left;
+            btnInstallUpdate.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            btnInstallUpdate.Padding = btnCheckUpdate.Padding;
 
             string UpdateStatusText(AppUpdateState state) => state.Status switch
             {
@@ -2337,7 +2346,6 @@ public class SettingsForm : Form
             updateLayout.Controls.Add(lblUpdateStatus, 0, 1);
             updateLayout.Controls.Add(btnCheckUpdate, 1, 1);
             updateLayout.Controls.Add(btnInstallUpdate, 2, 1);
-            updatePanel.Controls.Add(updateLayout);
             RenderUpdateState(_updateService.State);
         }
 
@@ -2358,7 +2366,7 @@ public class SettingsForm : Form
             Text = _locService.GetString(
                 "Settings_DiagnosticsPrivacy",
                 "Contains technical configuration counts only—no typed text, clipboard data, paths, API keys, or log contents."),
-            ForeColor = Color.Gray,
+            ForeColor = secondary,
             Font = new Font("Segoe UI", 9),
             Location = new Point(0, lblDiagnostics.Bottom + 8),
             Width = 780,
@@ -2415,17 +2423,40 @@ public class SettingsForm : Form
             }
         };
 
-        pnl.Controls.Add(picLogo);
-        pnl.Controls.Add(lblDesc);
-        pnl.Controls.Add(linkGitHub);
-        if (updatePanel != null)
-            pnl.Controls.Add(updatePanel);
-        pnl.Controls.Add(lblDiagnostics);
-        pnl.Controls.Add(lblDiagnosticsPrivacy);
-        pnl.Controls.Add(txtDiagnostics);
-        pnl.Controls.Add(btnCopyDiagnostics);
-        pnl.Controls.Add(lblCopyStatus);
-        pnl.Controls.Add(lblTitle);
+        var content = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, Padding = new Padding(0, 0, 12, 12) };
+        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        void Row(Control c, int top, bool fill = true)
+        {
+            int row = content.RowCount++;
+            content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            c.Margin = new Padding(0, top, 0, 0);
+            c.Anchor = AnchorStyles.Top | AnchorStyles.Left | (fill ? AnchorStyles.Right : AnchorStyles.None);
+            content.Controls.Add(c, 0, row);
+        }
+        Row(lblTitle, 0);
+        var intro = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, RowCount = 2 };
+        intro.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        intro.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        picLogo.Size = new Size(64, 64);
+        picLogo.Margin = new Padding(0, 2, 12, 0);
+        intro.Controls.Add(picLogo, 0, 0);
+        intro.SetRowSpan(picLogo, 2);
+        lblDesc.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        intro.Controls.Add(lblDesc, 1, 0);
+        intro.Controls.Add(linkGitHub, 1, 1);
+        Row(intro, 6);
+        if (updatePanel != null) Row(updatePanel, 14);
+        Row(lblDiagnostics, 14);
+        lblDiagnosticsPrivacy.AutoSize = true;
+        Row(lblDiagnosticsPrivacy, 4);
+        var actions = new FlowLayoutPanel { AutoSize = true, WrapContents = true };
+        actions.Controls.Add(btnCopyDiagnostics);
+        actions.Controls.Add(lblCopyStatus);
+        Row(actions, 6);
+        txtDiagnostics.Height = 160;
+        Row(txtDiagnostics, 5);
+        pnl.Controls.Add(content);
         _tabAbout.Controls.Add(pnl);
     }
 

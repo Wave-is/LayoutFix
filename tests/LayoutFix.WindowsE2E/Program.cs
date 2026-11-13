@@ -3991,6 +3991,8 @@ internal static class Program
                     var checkBounds = updateCheck.RectangleToScreen(updateCheck.ClientRectangle);
                     if (statusBounds.Right > checkBounds.Left)
                         throw new InvalidOperationException("The About update controls overlap.");
+                    if (updateCheck.Height > updateCheck.GetPreferredSize(Size.Empty).Height * 2)
+                        throw new InvalidOperationException("The update button is stretched vertically.");
                 }
 
                 if (tabName.Equals("Languages", StringComparison.OrdinalIgnoreCase))
@@ -4142,6 +4144,13 @@ internal static class Program
                         .SingleOrDefault(control => control.Visible && control.AccessibleName == "DiagnosticsReport.Copy");
                     if (report == null || copyButton == null)
                         throw new InvalidOperationException("The safe diagnostics preview or copy action is missing.");
+                    var privacy = Descendants(form).OfType<Label>().Single(label =>
+                        label.Visible && label.Text == localization.GetString("Settings_DiagnosticsPrivacy",
+                            "Contains technical configuration counts only—no typed text, clipboard data, paths, API keys, or log contents."));
+                    if (privacy.Height < privacy.GetPreferredSize(new Size(privacy.Width, 0)).Height ||
+                        privacy.RectangleToScreen(privacy.ClientRectangle).Bottom > copyButton.PointToScreen(Point.Empty).Y ||
+                        copyButton.RectangleToScreen(copyButton.ClientRectangle).Bottom > report.PointToScreen(Point.Empty).Y)
+                        throw new InvalidOperationException("The diagnostics explanation or copy action is clipped.");
                     if (!report.ReadOnly || report.Text.Contains(diagnosticsSentinel, StringComparison.Ordinal))
                         throw new InvalidOperationException("The diagnostics preview exposed seeded user content.");
 
