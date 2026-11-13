@@ -170,6 +170,7 @@ internal static class Program
                 Application.Idle -= startUpdateCheck;
                 if (settings.Current.AutoUpdateEnabled &&
                     updateService.State.Status == AppUpdateStatus.ReadyToInstall &&
+                    !updateService.HasAttemptedInstall &&
                     updateService.TryStartInstaller())
                 {
                     Application.Exit();

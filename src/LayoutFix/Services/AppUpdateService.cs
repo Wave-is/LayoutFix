@@ -34,6 +34,7 @@ public sealed class AppUpdateService : IAppUpdateService, IDisposable
     private AppUpdateState _state = new(AppUpdateStatus.Idle);
     private string? _readyPayloadPath;
     private string? _readyInstallerPath;
+    private byte[]? _readyInstallerHash;
     private string? _readyMarkerPath;
     private UpdatePackageKind? _readyPackageKind;
     private ReleaseVersion? _readyVersion;
@@ -127,6 +128,8 @@ public sealed class AppUpdateService : IAppUpdateService, IDisposable
     }
 
     public event EventHandler<AppUpdateState>? StateChanged;
+    public bool HasAttemptedInstall => _readyMarkerPath != null &&
+        File.Exists(_readyMarkerPath + ".attempted");
 
     public void StartAutomaticCheck()
     {
@@ -142,8 +145,13 @@ public sealed class AppUpdateService : IAppUpdateService, IDisposable
             try
             {
                 await Task.Delay(TimeSpan.FromSeconds(2), lifetimeToken);
-                if (_settings.Current.AutoUpdateEnabled)
-                    await CheckAndDownloadAsync(cancellationToken: lifetimeToken);
+                while (!lifetimeToken.IsCancellationRequested)
+                {
+                    if (_settings.Current.AutoUpdateEnabled && State.Status is not
+                        (AppUpdateStatus.ReadyToInstall or AppUpdateStatus.Installing))
+                        await CheckAndDownloadAsync(cancellationToken: lifetimeToken);
+                    await Task.Delay(TimeSpan.FromHours(6), lifetimeToken);
+                }
             }
             catch (OperationCanceledException) when (lifetimeToken.IsCancellationRequested)
             {
@@ -191,7 +199,8 @@ public sealed class AppUpdateService : IAppUpdateService, IDisposable
                 ? stagedPackage.Path
                 : null;
             _readyVersion = release.Version;
-            _readyMarkerPath = WriteReadyMarker(stagedPackage, release.Version);
+            _readyInstallerHash = release.ExpectedHash;
+            _readyMarkerPath = WriteReadyMarker(stagedPackage, release.Version, release.ExpectedHash);
             SetState(new AppUpdateState(
                 AppUpdateStatus.ReadyToInstall,
                 release.Version.ToString(),
@@ -236,6 +245,10 @@ public sealed class AppUpdateService : IAppUpdateService, IDisposable
             {
                 if (_readyInstallerPath == null || !File.Exists(_readyInstallerPath))
                     return false;
+                using var verifiedFile = File.OpenRead(_readyInstallerPath);
+                if (_readyInstallerHash == null ||
+                    !CryptographicOperations.FixedTimeEquals(SHA256.HashData(verifiedFile), _readyInstallerHash))
+                    throw new InvalidDataException("The staged installer changed after download.");
                 var installerStartInfo = new ProcessStartInfo(_readyInstallerPath)
                 {
                     UseShellExecute = false,
@@ -246,10 +259,11 @@ public sealed class AppUpdateService : IAppUpdateService, IDisposable
                 installerStartInfo.ArgumentList.Add("/NORESTART");
                 installerStartInfo.ArgumentList.Add("/CLOSEAPPLICATIONS");
                 installerStartInfo.ArgumentList.Add("/LAUNCHAFTERUPDATE");
+                installerStartInfo.ArgumentList.Add($"/LOG={Path.Combine(_updateRoot, "last-installer.log")}");
                 installerStartInfo.ArgumentList.Add($"/DIR={installDirectory}");
+                File.WriteAllText(_readyMarkerPath! + ".attempted", version.Value.ToString());
                 using var installerProcess = Process.Start(installerStartInfo)
                     ?? throw new InvalidOperationException("The verified update installer could not start.");
-                TryDeleteFile(_readyMarkerPath);
                 SetState(new AppUpdateState(AppUpdateStatus.Installing, version.Value.ToString(), 100));
                 _logger.LogInfo($"Verified update installer started. Version={version.Value}.");
                 return true;
@@ -598,7 +612,7 @@ public sealed class AppUpdateService : IAppUpdateService, IDisposable
         return true;
     }
 
-    private string WriteReadyMarker(StagedPackage package, ReleaseVersion version)
+    private string WriteReadyMarker(StagedPackage package, ReleaseVersion version, byte[] hash)
     {
         var stageDirectory = package.Kind == UpdatePackageKind.Portable
             ? Directory.GetParent(package.Path)?.FullName
@@ -610,7 +624,7 @@ public sealed class AppUpdateService : IAppUpdateService, IDisposable
         var json = JsonSerializer.Serialize(new ReadyMarker(
             version.ToString(),
             package.Kind.ToString(),
-            relativePackagePath));
+            relativePackagePath, "sha256:" + Convert.ToHexString(hash)));
         File.WriteAllText(markerPath, json);
         return markerPath;
     }
@@ -649,12 +663,15 @@ public sealed class AppUpdateService : IAppUpdateService, IDisposable
                         ValidatePayload(packagePath, version);
                     else
                     {
+                        if (!TryParseSha256Digest(marker.Digest, out var expectedHash))
+                            continue;
                         if (!File.Exists(packagePath) ||
                             _payloadVersionReader(packagePath) is not { } installerVersion ||
                             installerVersion.CompareTo(version) != 0)
                         {
                             continue;
                         }
+                        _readyInstallerHash = expectedHash;
                     }
 
                     _readyPackageKind = kind;
@@ -729,7 +746,7 @@ public sealed class AppUpdateService : IAppUpdateService, IDisposable
 
     private sealed record StagedPackage(UpdatePackageKind Kind, string Path);
 
-    private sealed record ReadyMarker(string Version, string Kind, string RelativePackagePath);
+    private sealed record ReadyMarker(string Version, string Kind, string RelativePackagePath, string? Digest = null);
 
     private enum UpdatePackageKind
     {

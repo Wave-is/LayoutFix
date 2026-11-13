@@ -262,6 +262,20 @@ public class TextTransactionServiceTests
     }
 
     [Fact]
+    public async Task ExplicitSelection_EmptyAccessibilityReadUsesClipboardAndRechecksIt()
+    {
+        var clipboard = new FakeClipboardService("original");
+        var input = new FakeInputInjector(clipboard, "ghbdtn", "ghbdtn");
+        var service = new TextTransactionService(input, clipboard, new FakeActiveWindowProvider(),
+            new NullLogger(), new SelectedTextTargetGuard(null, null));
+        var selection = await service.CaptureAsync(false);
+        Assert.Equal("ghbdtn", selection?.Text);
+        Assert.True(await service.ReplaceAsync(selection!, "привет"));
+        Assert.Equal(0, input.SelectWordCount);
+        Assert.Equal("original", clipboard.Value);
+    }
+
+    [Fact]
     public async Task ApplicableDirectAdapter_UsesPreviousWordFallbackWithoutClipboard()
     {
         var clipboard = new FakeClipboardService("complex user clipboard payload");

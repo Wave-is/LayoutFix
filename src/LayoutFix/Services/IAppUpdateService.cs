@@ -20,6 +20,7 @@ public sealed record AppUpdateState(
 public interface IAppUpdateService
 {
     AppUpdateState State { get; }
+    bool HasAttemptedInstall => false;
     event EventHandler<AppUpdateState>? StateChanged;
 
     void StartAutomaticCheck();

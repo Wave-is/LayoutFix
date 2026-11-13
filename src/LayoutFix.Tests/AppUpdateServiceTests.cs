@@ -140,10 +140,18 @@ public sealed class AppUpdateServiceTests : IDisposable
         await service.CheckAndDownloadAsync(force: true);
 
         Assert.Equal(AppUpdateStatus.ReadyToInstall, service.State.Status);
-        Assert.Single(Directory.EnumerateFiles(
+        var staged = Assert.Single(Directory.EnumerateFiles(
             Path.Combine(_root, "updates"),
             AppUpdateService.InstallerAssetName,
             SearchOption.AllDirectories));
+        var marker = Path.Combine(Path.GetDirectoryName(staged)!, "ready.json");
+        File.WriteAllText(marker + ".attempted", "1.0.24");
+        using var retry = CreateService(client, new ReleaseVersion(1, 0, 23), installed: true);
+        Assert.True(retry.HasAttemptedInstall);
+        Assert.Equal(AppUpdateStatus.ReadyToInstall, retry.State.Status);
+        File.AppendAllText(staged, "corrupted");
+        Assert.False(retry.TryStartInstaller());
+        Assert.Equal(AppUpdateStatus.Failed, retry.State.Status);
     }
 
     private AppUpdateService CreateService(

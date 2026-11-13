@@ -577,7 +577,11 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
                 ? selections[0].GetAttributeValue(TextPattern.IsReadOnlyAttribute)
                 : null;
             var accepted = IsWritableChromiumGroupRange(
-                documentReadOnly, selectionReadOnly, selections.Length);
+                documentReadOnly, selectionReadOnly, selections.Length) ||
+                (ReferenceEquals(documentReadOnly, TextPattern.MixedAttributeValue) &&
+                 selections.Length == 1 && selectionReadOnly is false &&
+                 selections[0].CompareEndpoints(TextPatternRangeEndpoint.Start,
+                     selections[0], TextPatternRangeEndpoint.End) < 0);
             if (accepted)
                 verifiedSelection = selections[0];
             LogAutomationDiagnostic(logger, diagnosticsEnabled,
@@ -788,12 +792,35 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
         // Read the same range whose attributes were verified, not a second
         // potentially changed selection. This also avoids another UIA round trip.
         if (verifiedGroupSelection != null)
-            return TextSelectionReadResult.Verified(verifiedGroupSelection.GetText(-1));
+            return ReadVerifiedRange(verifiedGroupSelection);
 
         var selections = textPattern.GetSelection();
         return selections.Length == 1
-            ? TextSelectionReadResult.Verified(selections[0].GetText(-1))
+            ? ReadVerifiedRange(selections[0])
             : TextSelectionReadResult.Unsupported;
+    }
+
+    private static TextSelectionReadResult ReadVerifiedRange(TextPatternRange range)
+    {
+        var text = range.GetText(-1);
+        var result = TextSelectionReadResult.Verified(text);
+        if (!string.IsNullOrEmpty(text))
+            return result;
+        if (range.CompareEndpoints(TextPatternRangeEndpoint.Start, range, TextPatternRangeEndpoint.End) != 0)
+            return TextSelectionReadResult.Unsupported;
+
+        result = result with { IsConfirmedCaret = true };
+        var word = range.Clone();
+        word.ExpandToEnclosingUnit(TextUnit.Word);
+        if (range.CompareEndpoints(TextPatternRangeEndpoint.Start, word, TextPatternRangeEndpoint.Start) <= 0)
+            return result;
+        var suffix = word.Clone();
+        suffix.MoveEndpointByRange(TextPatternRangeEndpoint.Start, range, TextPatternRangeEndpoint.Start);
+        var next = suffix.GetText(1);
+        var token = word.GetText(257).TrimEnd();
+        return next.Length > 0 && char.IsLetter(next[0]) && token.Length is > 0 and <= 256 && token.All(char.IsLetter)
+            ? result with { WordAroundCaret = token }
+            : result;
     }
 
     internal static bool IsWritableNativeEditStyle(long style) =>

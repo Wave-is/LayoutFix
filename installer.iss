@@ -1,5 +1,9 @@
 #ifndef MyAppVersion
-#define MyAppVersion "1.0.22"
+#define MyAppVersion "1.0.24"
+#endif
+
+#ifndef MyAppPayloadDirectory
+#define MyAppPayloadDirectory "src\LayoutFix\bin\Release\net8.0-windows\win-x64\publish"
 #endif
 
 [Setup]
@@ -38,18 +42,24 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 Name: "autostart"; Description: "Run LayoutFix automatically when Windows starts"; GroupDescription: "System integration:"; Flags: unchecked
 
 [Files]
-Source: "src\LayoutFix\bin\Release\net8.0-windows\win-x64\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppPayloadDirectory}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
+#ifndef LayoutFixTestInstall
 Name: "{group}\LayoutFix"; Filename: "{app}\LayoutFix.exe"
 Name: "{autodesktop}\LayoutFix"; Filename: "{app}\LayoutFix.exe"; Tasks: desktopicon
+#endif
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "LayoutFix"; ValueData: """{app}\LayoutFix.exe"""; Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
 Filename: "{app}\LayoutFix.exe"; Description: "Launch LayoutFix now"; Flags: nowait postinstall skipifsilent
-Filename: "{app}\LayoutFix.exe"; Flags: nowait; Check: ShouldLaunchAfterSilentUpdate
+#ifdef LayoutFixTestInstall
+Filename: "{app}\LayoutFix.exe"; Parameters: "--smoke-test"; Flags: waituntilterminated runasoriginaluser; Check: ShouldLaunchAfterSilentUpdate
+#else
+Filename: "{app}\LayoutFix.exe"; Flags: nowait runasoriginaluser; Check: ShouldLaunchAfterSilentUpdate
+#endif
 
 [Code]
 function HasExactCommandLineSwitch(const Value: String): Boolean;
@@ -70,4 +80,18 @@ end;
 function ShouldLaunchAfterSilentUpdate(): Boolean;
 begin
   Result := WizardSilent and HasExactCommandLineSwitch('/LAUNCHAFTERUPDATE');
+end;
+
+function InitializeSetup(): Boolean;
+var
+  Attempt: Integer;
+begin
+  Result := True;
+  if not HasExactCommandLineSwitch('/LAUNCHAFTERUPDATE') then Exit;
+  for Attempt := 1 to 300 do begin
+    if not CheckForMutexes('LayoutFix_SingleInstance_Mutex') then Exit;
+    Sleep(100);
+  end;
+  Log('The running LayoutFix instance did not finish shutting down.');
+  Result := False;
 end;

@@ -1,14 +1,15 @@
 param(
     [Parameter(Mandatory = $false)]
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$Version = '1.0.22',
+    [string]$Version = '1.0.24',
 
     [Parameter(Mandatory = $false)]
     [ValidatePattern('^[A-Za-z0-9._-]+$')]
     [string]$ProtectedProcessName = 'LayoutFix',
 
     [Parameter(Mandatory = $false)]
-    [string]$CompilerPath = ''
+    [string]$CompilerPath = '',
+    [string]$PreviousPayload = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,6 +44,16 @@ $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $existingRunValue = (Get-ItemProperty -Path $runKey -Name LayoutFix -ErrorAction SilentlyContinue).LayoutFix
 $hadExistingRunValue = $null -ne $existingRunValue
 $testInstaller = Join-Path $workspace 'Output\LayoutFix_Setup_Test.exe'
+$initialInstaller = $testInstaller
+$initialVersion = $Version
+if ($PreviousPayload) {
+    $PreviousPayload = (Resolve-Path -LiteralPath $PreviousPayload).Path
+    $initialVersion = ((Get-Item -LiteralPath (Join-Path $PreviousPayload 'LayoutFix.exe')).VersionInfo.ProductVersion -split '\+')[0].Trim()
+    if ($initialVersion -notmatch '^\d+\.\d+\.\d+$' -or [version]$initialVersion -ge [version]$Version) {
+        throw "Previous payload must be older than $Version."
+    }
+    $initialInstaller = Join-Path $artifacts ("installer-baseline-" + [guid]::NewGuid().ToString('N') + '.exe')
+}
 $windowsE2E = Join-Path $workspace 'tests\LayoutFix.WindowsE2E\bin\Release\net8.0-windows\win-x64\LayoutFix.WindowsE2E.exe'
 if (-not (Test-Path -LiteralPath $windowsE2E)) {
     throw 'Windows E2E executable is missing; build it before installer lifecycle.'
@@ -129,6 +140,10 @@ $env:LAYOUTFIX_SMOKE_LOG = $smokeLog
 try {
     Push-Location $workspace
     try {
+        if ($PreviousPayload) {
+            & $resolvedCompilerPath "/DMyAppVersion=$initialVersion" "/DMyAppPayloadDirectory=$PreviousPayload" '/DLayoutFixTestInstall=1' "/O$artifacts" "/F$([IO.Path]::GetFileNameWithoutExtension($initialInstaller))" 'installer.iss' | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Previous-version test installer compilation failed." }
+        }
         & $resolvedCompilerPath "/DMyAppVersion=$Version" '/DLayoutFixTestInstall=1' 'installer.iss' | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "Test installer compilation failed with exit code $LASTEXITCODE."
@@ -146,7 +161,7 @@ try {
         '/NOICONS',
         "/DIR=$testDirectory"
     )
-    $install = Start-Process $testInstaller -ArgumentList $installArguments -WindowStyle Hidden -Wait -PassThru
+    $install = Start-Process $initialInstaller -ArgumentList $installArguments -WindowStyle Hidden -Wait -PassThru
     if ($install.ExitCode -ne 0) {
         throw "Test install failed with exit code $($install.ExitCode)."
     }
@@ -167,19 +182,37 @@ try {
     Invoke-StartupLifecycle $installedApplication
     Assert-UserProfileUnchanged $userProfileBefore
     $installedVersion = (Get-Item -LiteralPath $installedApplication).VersionInfo.ProductVersion
-    if ($installedVersion -notlike "$Version*") {
+    if (($installedVersion -split '\+')[0].Trim() -ne $initialVersion) {
         throw "Installed version mismatch: $installedVersion"
     }
 
-    $update = Start-Process $testInstaller -ArgumentList $installArguments -WindowStyle Hidden -Wait -PassThru
-    if ($update.ExitCode -ne 0) {
-        throw "Test update failed with exit code $($update.ExitCode)."
+    $exitMutex = [Threading.Mutex]::new($false, 'LayoutFix_SingleInstance_Mutex')
+    $stage = Join-Path $artifacts ("installer-ota-" + [Guid]::NewGuid().ToString('N'))
+    try {
+        & $windowsE2E --installed-update-start $installedApplication $testInstaller $stage
+        if ($LASTEXITCODE -ne 0) { throw "Installed updater failed to download, verify or start Setup." }
+        Start-Sleep -Seconds 3
+        Assert-SmokeIsolation 1
+    } finally {
+        $exitMutex.Dispose()
+    }
+    $otaDeadline = [DateTime]::UtcNow.AddSeconds(120)
+    $setupLog = Join-Path $stage 'last-installer.log'
+    do {
+        Start-Sleep -Milliseconds 300
+        $completed = (Test-Path -LiteralPath $setupLog) -and
+            (Select-String -LiteralPath $setupLog -Pattern 'Log closed' -Quiet)
+    } while (-not $completed -and [DateTime]::UtcNow -lt $otaDeadline)
+    if (-not $completed) { throw "OTA setup did not finish. See $setupLog" }
+    Assert-SmokeIsolation 2
+    if (((Get-Item -LiteralPath $installedApplication).VersionInfo.ProductVersion -split '\+')[0].Trim() -ne $Version) {
+        throw 'Installed executable was not upgraded to the target version.'
     }
     $updatedSmoke = Start-Process $installedApplication -ArgumentList '--smoke-test' -WindowStyle Hidden -Wait -PassThru
     if ($updatedSmoke.ExitCode -ne 0) {
         throw "Updated smoke test failed with exit code $($updatedSmoke.ExitCode)."
     }
-    Assert-SmokeIsolation 2
+    Assert-SmokeIsolation 3
     Assert-UserProfileUnchanged $userProfileBefore
     Invoke-StartupLifecycle $installedApplication
     Assert-UserProfileUnchanged $userProfileBefore
@@ -211,7 +244,7 @@ try {
     }
     Assert-UserProfileUnchanged $userProfileBefore
 
-    "installer_lifecycle=pass version=$Version install_update_uninstall=pass smoke_profile=isolated startup_recovery=pass session_recovery=pass user_profile=unchanged"
+    "installer_lifecycle=pass from=$initialVersion to=$Version install_update_uninstall=pass smoke_profile=isolated startup_recovery=pass session_recovery=pass user_profile=unchanged"
 }
 finally {
     if ($hadExistingRunValue) {

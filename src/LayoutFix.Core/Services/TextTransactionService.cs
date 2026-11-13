@@ -203,11 +203,16 @@ public sealed class TextTransactionService : ITextTransactionService
                 $"Availability={selectionAvailability}; DirectText={selectionRead.IsSupported}");
 
             string? selectedText = selectionRead.Text;
+            var wordAroundCaret = selectionRead.WordAroundCaret;
             if (selectionAvailability == TextSelectionAvailability.None)
             {
                 if (!allowPreviousWordFallback)
                 {
                     selectedText = null;
+                    // Some editors copy the current line when only a caret is
+                    // present. Never treat that line as an explicit selection.
+                    if (!selectionRead.IsConfirmedCaret)
+                        selectionRead = TextSelectionReadResult.Unsupported;
                 }
                 else
                 {
@@ -218,6 +223,12 @@ public sealed class TextTransactionService : ITextTransactionService
                         return null;
                     }
 
+                    if (wordAroundCaret != null)
+                    {
+                        await _input.SendKeyCombinationAsync(true, false, false, "right");
+                        if (InputChanged(captureInputGeneration) || !_activeWindow.IsSameActiveWindow(window))
+                            return null;
+                    }
                     await _input.SelectWordLeftAsync();
                     fallbackSelectionMade = true;
                     selectionRead = _targetGuard != null
@@ -279,7 +290,9 @@ public sealed class TextTransactionService : ITextTransactionService
                 _logger.LogInfo("Selection read directly through UI Automation for text capture.");
             }
 
-            if (string.IsNullOrEmpty(selectedText))
+            if (string.IsNullOrEmpty(selectedText) ||
+                (fallbackSelectionMade && wordAroundCaret != null &&
+                 !string.Equals(wordAroundCaret, selectedText.TrimEnd(), StringComparison.Ordinal)))
             {
                 if (fallbackSelectionMade)
                 {
@@ -524,7 +537,8 @@ public sealed class TextTransactionService : ITextTransactionService
             }
             string? currentSelection;
             var verifyWithClipboard = !selectionRead.IsSupported ||
-                selection.WasSelectedByFallback && string.IsNullOrEmpty(selectionRead.Text);
+                string.IsNullOrEmpty(selectionRead.Text) &&
+                (!selectionRead.IsConfirmedCaret || selection.WasSelectedByFallback);
             if (!verifyWithClipboard)
             {
                 currentSelection = selectionRead.Text;

@@ -14,6 +14,8 @@ public readonly record struct TextSelectionReadResult(
     string? Text,
     bool IsSafeToModify = false)
 {
+    public string? WordAroundCaret { get; init; }
+    public bool IsConfirmedCaret { get; init; }
     public static TextSelectionReadResult Unsupported => new(false, null, false);
 
     public static TextSelectionReadResult Captured(string? text) => new(true, text, false);

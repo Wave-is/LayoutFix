@@ -57,6 +57,8 @@ internal static class Program
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+        if (args.Length == 4 && args[0] == "--installed-update-start")
+            return StartInstalledUpdateTest(args[1], args[2], args[3]).GetAwaiter().GetResult();
 
         if (args.Length >= 4 && args[0] == "--edit-host")
             return RunExternalEditHost(args[1], args[2], args[3]);
@@ -213,6 +215,7 @@ internal static class Program
         string? browserTargetKind = null;
         var duplicateBrowserHotkeyDuringAction = false;
         var browserCaretFallbackTest = false;
+        var middleOfWord = false;
         var holdHotkeyModifiersDuringAction = false;
         var browserNoOpSiblingLayoutTest = false;
         var partialReplacementTest = false;
@@ -293,6 +296,8 @@ internal static class Program
                     duplicateBrowserHotkeyDuringAction = true;
                 else if (string.Equals(browserMode, "caret", StringComparison.OrdinalIgnoreCase))
                     browserCaretFallbackTest = true;
+                else if (browserMode == "middle")
+                    middleOfWord = browserCaretFallbackTest = true;
                 else if (string.Equals(browserMode, "holdshift", StringComparison.OrdinalIgnoreCase))
                     holdHotkeyModifiersDuringAction = true;
                 else if (string.Equals(browserMode, "sibling", StringComparison.OrdinalIgnoreCase))
@@ -657,7 +662,11 @@ internal static class Program
                             "The compatibility sentinel could not be replaced through the production transaction.");
                     }
                     if (browserCaretFallbackTest)
+                    {
                         SendExternalKeys(0x23); // End: exercise previous-word fallback.
+                        if (middleOfWord)
+                            SendExternalKeys(0x25);
+                    }
                     else
                         SendExternalSelectAll();
                     await Task.Delay(100);
@@ -7745,6 +7754,39 @@ internal static class Program
             return Task.CompletedTask;
         }
         public bool TryStartInstaller() => false;
+    }
+
+    private static async Task<int> StartInstalledUpdateTest(string app, string setup, string stage)
+    {
+        using var client = new System.Net.Http.HttpClient(new InstallerReleaseFixture(setup));
+        using var service = new AppUpdateService(new DictionaryPerformanceSettingsService(),
+            new E2ENullLogger(), client, new ReleaseVersion(1, 0, 23), stage, app);
+        await service.CheckAndDownloadAsync(force: true);
+        return service.State.Status == AppUpdateStatus.ReadyToInstall &&
+            service.TryStartInstaller() && service.HasAttemptedInstall ? 0 : 1;
+    }
+
+    private sealed class InstallerReleaseFixture(string setup) : System.Net.Http.HttpMessageHandler
+    {
+        protected override Task<System.Net.Http.HttpResponseMessage> SendAsync(
+            System.Net.Http.HttpRequestMessage request, CancellationToken token)
+        {
+            using var source = File.OpenRead(setup);
+            var version = FileVersionInfo.GetVersionInfo(setup).ProductVersion?.Trim();
+            var url = $"https://github.com/Wave-is/LayoutFix/releases/download/v{version}/{AppUpdateService.InstallerAssetName}";
+            var response = new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK);
+            if (request.RequestUri?.AbsoluteUri == url)
+                response.Content = new System.Net.Http.StreamContent(File.OpenRead(setup));
+            else
+                response.Content = new System.Net.Http.StringContent(JsonSerializer.Serialize(new {
+                    tag_name = $"v{version}", assets = new[] { new {
+                        name = AppUpdateService.InstallerAssetName, size = source.Length,
+                        digest = "sha256:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(source)),
+                        browser_download_url = url
+                    }}
+                }));
+            return Task.FromResult(response);
+        }
     }
 
     private sealed class E2ENullLogger : ILoggerService
