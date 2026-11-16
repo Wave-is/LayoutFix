@@ -8,4 +8,7 @@ public sealed record TextSelection(
     long? MouseInputGeneration = null,
     string? DirectAdapterId = null,
     long? DiagnosticCaptureId = null,
-    bool AllowTargetLayoutActivation = true);
+    bool AllowTargetLayoutActivation = true)
+{
+    public bool CopyOnly { get; init; }
+}

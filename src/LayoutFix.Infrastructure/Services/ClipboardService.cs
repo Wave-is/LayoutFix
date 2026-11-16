@@ -108,6 +108,15 @@ public sealed class ClipboardService : IClipboardService
 
     public uint GetSequenceNumber() => Win32.GetClipboardSequenceNumber();
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern nint GetClipboardOwner();
+
+    public bool IsOwnedByProcess(uint processId)
+    {
+        var owner = GetClipboardOwner();
+        return processId != 0 && owner != 0 && Win32.GetWindowThreadProcessId(owner, out var pid) != 0 && pid == processId;
+    }
+
     private IClipboardSnapshot CaptureOnStaThread()
         => RetryTransientClipboardOperation(CaptureOnStaThreadOnce);
 

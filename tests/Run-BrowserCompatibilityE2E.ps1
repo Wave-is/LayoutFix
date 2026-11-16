@@ -293,6 +293,11 @@ foreach ($iteration in 1..$Runs) {
 }
 Write-Output "browser_evidence path=$evidenceRoot"
 
+& $harness '--chrome-test' 'readonlygroup' 'steamcopy'
+if ($LASTEXITCODE -ne 0 -or !(Select-String -LiteralPath $resultPath -Pattern 'copy-only:readonly-browser=True;clipboardRestored=True;clickResult=True' -Quiet)) {
+    throw 'Copy-only browser correction did not preserve the field and clipboard or deliver the result on click.'
+}
+
 $profileLeaks = @(
     Get-ChildItem `
         -LiteralPath $temporaryRoot `

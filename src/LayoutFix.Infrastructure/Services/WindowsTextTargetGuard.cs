@@ -634,8 +634,35 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
     }
 
     private static bool IsChromiumTopLevelWindow(ActiveWindowContext context) =>
+        IsChromeWidget(context.ForegroundWindow);
+
+    public async Task<bool> CanCopySteamDocumentAsync(ActiveWindowContext context, CancellationToken token)
+    {
+        if (!context.IsValid || !_activeWindow.IsSameActiveWindow(context) ||
+            WindowClass(context.ForegroundWindow) != "SDL_app" || !IsChromeWidget(context.FocusedWindow) ||
+            _integrityProbe(context.ProcessId) != TargetInputAccess.Allowed ||
+            !_selectionProbeGate.Wait(0)) return false;
+        var probe = Task.Run(() =>
+        {
+            using var process = Process.GetProcessById(checked((int)context.ProcessId));
+            if (!process.ProcessName.Equals("steamwebhelper", StringComparison.OrdinalIgnoreCase)) return false;
+            var focused = AutomationElement.FocusedElement;
+            if (focused == null) return false;
+            var current = focused.Current;
+            return current.ProcessId == process.Id && current.IsEnabled && !current.IsPassword &&
+                current.ControlType == ControlType.Document;
+        });
+        // A stalled provider retains its single probe slot until it actually exits.
+        _ = probe.ContinueWith(t => { _ = t.Exception; _selectionProbeGate.Release(); },
+            CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        try { return await probe.WaitAsync(TimeSpan.FromMilliseconds(SelectionProbeTimeoutMilliseconds), token)
+                && _activeWindow.IsSameActiveWindow(context); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return false; }
+    }
+
+    private static bool IsChromeWidget(nint window) =>
         string.Equals(
-            WindowClass(context.ForegroundWindow),
+            WindowClass(window),
             "Chrome_WidgetWin_1",
             StringComparison.Ordinal);
 

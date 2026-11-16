@@ -6,6 +6,8 @@ namespace LayoutFix.Core.Interfaces;
 
 public interface ITextTransactionService
 {
+    Task<TextSelection?> CaptureExplicitCorrectionAsync(CancellationToken token = default) =>
+        CaptureAsync(false, token);
     Task<TextSelection?> CaptureAsync(
         bool allowPreviousWordFallback,
         CancellationToken cancellationToken = default);

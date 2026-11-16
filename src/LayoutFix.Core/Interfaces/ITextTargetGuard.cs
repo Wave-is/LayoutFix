@@ -25,6 +25,8 @@ public readonly record struct TextSelectionReadResult(
 
 public interface ITextTargetGuard
 {
+    Task<bool> CanCopySteamDocumentAsync(ActiveWindowContext context, CancellationToken token) =>
+        Task.FromResult(false);
     Task<bool> CanModifyAsync(
         ActiveWindowContext context,
         CancellationToken cancellationToken = default);

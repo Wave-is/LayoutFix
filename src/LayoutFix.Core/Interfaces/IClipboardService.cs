@@ -14,4 +14,5 @@ public interface IClipboardService : IDisposable
     Task<string?> ReadTextAsync(CancellationToken cancellationToken = default);
     Task SetTextAsync(string text, CancellationToken cancellationToken = default);
     uint GetSequenceNumber();
+    bool IsOwnedByProcess(uint processId) => false;
 }

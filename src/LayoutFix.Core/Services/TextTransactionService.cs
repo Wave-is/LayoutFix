@@ -51,8 +51,15 @@ public sealed class TextTransactionService : ITextTransactionService
         _settingsService = settingsService;
     }
 
-    public async Task<TextSelection?> CaptureAsync(
+    public Task<TextSelection?> CaptureAsync(bool allowPreviousWordFallback, CancellationToken cancellationToken = default) =>
+        CaptureCoreAsync(allowPreviousWordFallback, false, cancellationToken);
+
+    public Task<TextSelection?> CaptureExplicitCorrectionAsync(CancellationToken token = default) =>
+        CaptureCoreAsync(false, true, token);
+
+    private async Task<TextSelection?> CaptureCoreAsync(
         bool allowPreviousWordFallback,
+        bool explicitCorrection,
         CancellationToken cancellationToken = default)
     {
         var captureId = Interlocked.Increment(ref _nextDiagnosticCaptureId);
@@ -170,6 +177,40 @@ public sealed class TextTransactionService : ITextTransactionService
             {
                 _logger.LogWarning("Text capture rejected because the focused control is secure or cannot be verified.");
                 LogSupportDiagnostic(captureId, "capture", "rejected", "target-safety-check-failed");
+                if (explicitCorrection && await _targetGuard.CanCopySteamDocumentAsync(window, cancellationToken))
+                {
+                    LogSupportDiagnostic(captureId, "target-probe", "accepted", "steam-document-copy-permitted");
+                    bool SameTarget() => !InputChanged(captureInputGeneration) && _activeWindow.IsSameActiveWindow(window);
+                    if (!SameTarget()) return null;
+                    using var saved = await _clipboard.CaptureAsync(cancellationToken);
+                    if (!SameTarget()) return null;
+                    var before = _clipboard.GetSequenceNumber();
+                    try
+                    {
+                        await _input.SendKeyCombinationAsync(true, false, false, "c");
+                        var elapsed = Stopwatch.StartNew();
+                        while (_clipboard.GetSequenceNumber() == before && elapsed.Elapsed < CopyTimeout && SameTarget())
+                            await Task.Delay(15, cancellationToken);
+                        var copied = _clipboard.GetSequenceNumber();
+                        if (copied == before || !SameTarget() || !_clipboard.IsOwnedByProcess(window.ProcessId))
+                        {
+                            LogSupportDiagnostic(captureId, "capture", "rejected", copied == before
+                                ? "steam-copy-no-change" : "steam-copy-ownership-unverified");
+                            return null;
+                        }
+                        var value = await _clipboard.ReadTextAsync(cancellationToken);
+                        if (string.IsNullOrWhiteSpace(value) || value.Length > 32768 ||
+                            !SameTarget() || copied != _clipboard.GetSequenceNumber()) return null;
+                        LogSupportDiagnostic(captureId, "capture", "accepted", "steam-copy-only", $"Length={value.Length}");
+                        return new TextSelection(value, window, false, DiagnosticCaptureId: captureId,
+                            AllowTargetLayoutActivation: false) { CopyOnly = true };
+                    }
+                    finally
+                    {
+                        if (_clipboard.GetSequenceNumber() != before && _clipboard.IsOwnedByProcess(window.ProcessId))
+                            await _clipboard.RestoreAsync(saved, CancellationToken.None);
+                    }
+                }
                 return null;
             }
             if (InputChanged(captureInputGeneration))
@@ -454,6 +495,7 @@ public sealed class TextTransactionService : ITextTransactionService
         CancellationToken cancellationToken = default)
     {
         var selectionInputGeneration = GetInputGeneration(selection);
+        if (selection.CopyOnly) return false;
         var captureId = selection.DiagnosticCaptureId ??
             Interlocked.Increment(ref _nextDiagnosticCaptureId);
         if (string.IsNullOrEmpty(replacement))

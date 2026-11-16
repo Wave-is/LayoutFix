@@ -216,6 +216,7 @@ internal static class Program
         var duplicateBrowserHotkeyDuringAction = false;
         var browserCaretFallbackTest = false;
         var selectedPhrase = false;
+        var steamCopyFixture = false;
         var middleOfWord = false;
         var holdHotkeyModifiersDuringAction = false;
         ushort heldShiftKey = Win32.VK_LSHIFT;
@@ -310,6 +311,8 @@ internal static class Program
                 else if (string.Equals(browserMode, "sibling", StringComparison.OrdinalIgnoreCase))
                     browserNoOpSiblingLayoutTest = true;
                 else if (browserMode == "phrase") selectedPhrase = true;
+                else if (browserMode == "steamcopy" && browserTargetKind == "readonlygroup")
+                    steamCopyFixture = holdHotkeyModifiersDuringAction = true;
                 else
                     return 64;
             }
@@ -414,12 +417,13 @@ internal static class Program
             clipboard,
             activeWindow,
             logger,
-            targetGuard,
+            steamCopyFixture ? new SteamCopyFixtureGuard() : targetGuard,
             keyboardHook,
             mouseHook,
             directTextAdapter,
             settings);
         using var translation = new NullTranslationCoordinator();
+        using var fixturePopup = steamCopyFixture ? new PopupService(settings) : null;
         using var coordinator = new HotkeyCoordinator(
             keyboardHook,
             textTransaction,
@@ -434,7 +438,7 @@ internal static class Program
             new NullSoundService(),
             translation,
             new NullTranslatorWindowProvider(),
-            dictionaryAnalyzer: dictionaryAnalyzer);
+            dictionaryAnalyzer: dictionaryAnalyzer, popupService: fixturePopup);
 
         using var form = new Form
         {
@@ -597,6 +601,26 @@ internal static class Program
                     if (Win32.GetForegroundWindow() != targetWindow)
                         throw new InvalidOperationException("The read-only browser lost focus before the shortcut; no input was sent.");
                     SendExternalHotkey(configuredHotkey, configuredHotkeyVirtualKey);
+                    if (steamCopyFixture)
+                    {
+                        Button? offer = null;
+                        var until = DateTime.UtcNow.AddSeconds(5);
+                        while (DateTime.UtcNow < until && offer == null)
+                        {
+                            await Task.Delay(25);
+                            offer = Application.OpenForms.OfType<TranslationPopupForm>().SelectMany(f =>
+                                f.Controls.OfType<Button>()).SingleOrDefault(b => b.AccessibleName == "ManualCorrection.CopyResult");
+                        }
+                        if (offer == null || !browserHost!.TryReadTargetText(out var original) ||
+                            original.TrimEnd('\r','\n') != "TEST" || await clipboard.ReadTextAsync() != ClipboardSentinel)
+                            throw new InvalidOperationException("Copy-only fixture did not preserve the original target and clipboard.");
+                        offer.PerformClick();
+                        var copied = await clipboard.ReadTextAsync();
+                        if (copied != "ЕУЫЕ") throw new InvalidOperationException("Copy action did not deliver the corrected text.");
+                        AppendResult("copy-only:readonly-browser=True;clipboardRestored=True;clickResult=True");
+                        _exitCode = 0;
+                        return;
+                    }
                     var rejectionDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(6);
                     string rejectionLog;
                     do
@@ -5733,6 +5757,14 @@ internal static class Program
 
             try { Directory.Delete(testDirectory, recursive: true); } catch { }
         }
+    }
+
+    // Emulates only the Steam-specific classification; all input, clipboard,
+    // correction, popup and browser code in the fixture is real.
+    private sealed class SteamCopyFixtureGuard : ITextTargetGuard
+    {
+        public Task<bool> CanModifyAsync(ActiveWindowContext c, CancellationToken token = default) => Task.FromResult(false);
+        public Task<bool> CanCopySteamDocumentAsync(ActiveWindowContext c, CancellationToken token) => Task.FromResult(true);
     }
 
     private static int RunBlacklistedProcessHost(string resultPath)

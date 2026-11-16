@@ -10,8 +10,11 @@ public sealed class PopupService : IPopupService, IDisposable
     private readonly Control _dispatcher;
     private bool _disposed;
 
-    public PopupService(ISettingsService settings)
+    private readonly ILocalizationService? _localization;
+
+    public PopupService(ISettingsService settings, ILocalizationService? localization = null)
     {
+        _localization = localization;
         _settings = settings;
         _dispatcher = new Control();
         _ = _dispatcher.Handle;
@@ -24,6 +27,13 @@ public sealed class PopupService : IPopupService, IDisposable
             Color.FromArgb(240, 240, 240),
             Color.Black);
         popup.Show();
+    });
+
+    public void OfferCorrectedCopy(string text) => Dispatch(() =>
+    {
+        var caption = _localization?.GetString("Manual_CopyCorrected", "Copy corrected text") ?? "Copy corrected text";
+        new TranslationPopupForm(caption, Color.FromArgb(45, 48, 54), Color.White,
+            autoCloseMilliseconds: 12_000, clipboardText: text).Show();
     });
 
     public void ShowStatus(string message, bool isError = false)

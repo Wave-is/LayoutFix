@@ -15,6 +15,7 @@ public class TranslationPopupForm : Form
     private readonly System.Windows.Forms.Timer _timerFade;
     private readonly System.Windows.Forms.Timer? _timerClose;
     private readonly bool _copyOnClick;
+    private readonly string _clipboardText;
     private double _opacity = 0;
 
     public TranslationPopupForm(
@@ -22,9 +23,10 @@ public class TranslationPopupForm : Form
         Color bgColor,
         Color textColor,
         int autoCloseMilliseconds = 0,
-        bool copyOnClick = true)
+        bool copyOnClick = true, string? clipboardText = null)
     {
         _copyOnClick = copyOnClick;
+        _clipboardText = clipboardText ?? text;
         this.FormBorderStyle = FormBorderStyle.None;
         this.ShowInTaskbar = false;
         this.BackColor = bgColor;
@@ -42,8 +44,23 @@ public class TranslationPopupForm : Form
         };
 
         this.Controls.Add(_lblText);
+        if (_copyOnClick)
+        {
+            _lblText.Cursor = Cursors.Hand;
+            _lblText.Click += (_, _) => OnClick(EventArgs.Empty);
+        }
 
         this.Size = new Size(_lblText.PreferredWidth + 30, _lblText.PreferredHeight + 30);
+        if (clipboardText != null)
+        {
+            _lblText.Visible = false;
+            var copy = new Button { Text = text, AutoSize = true, Location = new Point(10, 10),
+                AccessibleName = "ManualCorrection.CopyResult", BackColor = bgColor, ForeColor = textColor,
+                FlatStyle = FlatStyle.Flat, Padding = new Padding(8, 2, 8, 2) };
+            copy.Click += (_, _) => OnClick(EventArgs.Empty);
+            Controls.Add(copy);
+            ClientSize = new Size(copy.PreferredSize.Width + 20, copy.PreferredSize.Height + 20);
+        }
 
         _timerFade = new System.Windows.Forms.Timer { Interval = 15 };
         _timerFade.Tick += (s, e) =>
@@ -149,7 +166,10 @@ public class TranslationPopupForm : Form
     {
         base.OnClick(e);
         if (_copyOnClick)
-            Clipboard.SetText(_lblText.Text);
+        {
+            try { Clipboard.SetText(_clipboardText); }
+            catch (ExternalException) { return; } // Keep the action available for retry.
+        }
         this.Close();
     }
 }

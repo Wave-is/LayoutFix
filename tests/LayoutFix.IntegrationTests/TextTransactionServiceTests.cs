@@ -7,6 +7,29 @@ namespace LayoutFix.IntegrationTests;
 public class TextTransactionServiceTests
 {
     [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    public async Task ExplicitCorrection_CopyOnlyRequiresSteamAndOwnedCopy(bool eligible, bool owned, bool expected)
+    {
+        var clipboard = new FakeClipboardService("old") { Owned = owned };
+        var input = new FakeInputInjector(clipboard, "ghbdtn");
+        var service = new TextTransactionService(input, clipboard, new FakeActiveWindowProvider(), new NullLogger(),
+            new DenyTextTargetGuard { EligibleForCopy = eligible });
+        Assert.Null(await service.CaptureAsync(true));
+        Assert.Equal(0, input.CopyCount);
+        var selection = await service.CaptureExplicitCorrectionAsync();
+        Assert.Equal(expected, selection?.CopyOnly == true);
+        Assert.Equal(eligible ? 1 : 0, input.CopyCount);
+        if (selection != null)
+        {
+            Assert.Equal("old", clipboard.Value);
+            Assert.False(await service.ReplaceAsync(selection, "привет"));
+        }
+        Assert.Null(input.SentText);
+        Assert.Equal(0, input.PasteCount);
+    }
+    [Theory]
     [InlineData(true)]
     [InlineData(false)]
     public async Task MomentarilyCollapsedSelection_RecoveredBeforeNavigationOrReplacement(bool wordFallback)
@@ -721,6 +744,8 @@ public class TextTransactionServiceTests
             return Task.CompletedTask;
         }
         public uint GetSequenceNumber() => _sequence;
+        public bool Owned { get; init; }
+        public bool IsOwnedByProcess(uint processId) => Owned;
 
         public void SimulateCopy(string? text)
         {
@@ -957,6 +982,9 @@ public class TextTransactionServiceTests
 
     private sealed class DenyTextTargetGuard : ITextTargetGuard
     {
+        public bool EligibleForCopy { get; init; }
+        public Task<bool> CanCopySteamDocumentAsync(ActiveWindowContext c, CancellationToken token) =>
+            Task.FromResult(EligibleForCopy);
         public Task<bool> CanModifyAsync(
             ActiveWindowContext context,
             CancellationToken cancellationToken = default) => Task.FromResult(false);

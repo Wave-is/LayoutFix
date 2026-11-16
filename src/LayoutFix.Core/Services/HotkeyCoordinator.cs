@@ -464,7 +464,9 @@ public class HotkeyCoordinator : IHotkeyCoordinator
             }
 
             progress.Enter(ActionExecutionStage.TextCapture);
-            var selection = await _textTransactionService.CaptureAsync(
+            var selection = action == HotkeyAction.FixLayoutSelected
+                ? await _textTransactionService.CaptureExplicitCorrectionAsync(cancellationToken)
+                : await _textTransactionService.CaptureAsync(
                 allowPreviousWordFallback: action is HotkeyAction.FixLayout or HotkeyAction.Undo,
                 cancellationToken);
             if (selection?.WasSelectedByFallback == true)
@@ -533,6 +535,12 @@ public class HotkeyCoordinator : IHotkeyCoordinator
                     : ProcessText(text, action);
                 cancellationToken.ThrowIfCancellationRequested();
                 var textChanged = newText != null && newText != text;
+                if (selection.CopyOnly)
+                {
+                    if (textChanged) _popupService?.OfferCorrectedCopy(newText!);
+                    else _popupService?.ShowStatus("No layout change was found for the selection.");
+                    return;
+                }
                 _logger.LogInfo($"Text processing completed. Changed: {textChanged}, TargetLayout: '{targetLayoutCode}'");
 
                 if (textChanged)
