@@ -218,6 +218,7 @@ internal static class Program
         var selectedPhrase = false;
         var middleOfWord = false;
         var holdHotkeyModifiersDuringAction = false;
+        ushort heldShiftKey = Win32.VK_LSHIFT;
         var browserNoOpSiblingLayoutTest = false;
         var partialReplacementTest = false;
         var partialReplacementInputRaceTest = false;
@@ -301,6 +302,11 @@ internal static class Program
                     middleOfWord = browserCaretFallbackTest = true;
                 else if (string.Equals(browserMode, "holdshift", StringComparison.OrdinalIgnoreCase))
                     holdHotkeyModifiersDuringAction = true;
+                else if (browserMode == "holdrightshift")
+                {
+                    holdHotkeyModifiersDuringAction = true;
+                    heldShiftKey = Win32.VK_RSHIFT;
+                }
                 else if (string.Equals(browserMode, "sibling", StringComparison.OrdinalIgnoreCase))
                     browserNoOpSiblingLayoutTest = true;
                 else if (browserMode == "phrase") selectedPhrase = true;
@@ -723,7 +729,7 @@ internal static class Program
                         heldHotkeyModifiers = holdHotkeyModifiersDuringAction
                             ? SendExternalHotkeyKeepingModifiersPressed(
                                 configuredHotkey,
-                                configuredHotkeyVirtualKey)
+                                configuredHotkeyVirtualKey, heldShiftKey)
                             : [];
                         if (!holdHotkeyModifiersDuringAction)
                             SendExternalHotkey(configuredHotkey, configuredHotkeyVirtualKey);
@@ -946,6 +952,20 @@ internal static class Program
                         break;
                     }
 
+                    if (holdHotkeyModifiersDuringAction && browserHost != null)
+                    {
+                        if ((Win32.GetAsyncKeyState(Win32.VK_SHIFT) & 0x8000) != 0)
+                            throw new InvalidOperationException("Shift remained pressed after physical release.");
+                        SendExternalKeys(0x23, (ushort)'A');
+                        await Task.Delay(120);
+                        if (!browserHost.TryReadTargetText(out var afterRelease) ||
+                            afterRelease.TrimEnd('\r','\n') is not { Length: > 0 } typed ||
+                            !typed.StartsWith("TEST", StringComparison.Ordinal) ||
+                            typed.Length != 5 || !char.IsLower(typed[^1]))
+                            throw new InvalidOperationException("Following keystroke was not one lowercase letter.");
+                        AppendResult($"shift-release:side={heldShiftKey};lowercase=True");
+                        SendExternalKeys(0x08);
+                    }
                     completedIterations = iteration;
                     if (physicalIterations == 1 || iteration % 100 == 0)
                         AppendResult($"progress:completed={iteration}");
@@ -7106,7 +7126,7 @@ internal static class Program
 
     private static ushort[] SendExternalHotkeyKeepingModifiersPressed(
         string configuredHotkey,
-        ushort virtualKey)
+        ushort virtualKey, ushort shiftKey = Win32.VK_LSHIFT)
     {
         var combo = HotkeyCombo.Parse(configuredHotkey);
         if (combo.Win)
@@ -7115,7 +7135,7 @@ internal static class Program
         var pressedModifiers = new List<ushort>();
         if (combo.Ctrl) pressedModifiers.Add(0x11);
         if (combo.Alt) pressedModifiers.Add(0x12);
-        if (combo.Shift) pressedModifiers.Add(0x10);
+        if (combo.Shift) pressedModifiers.Add(shiftKey);
 
         foreach (var modifier in pressedModifiers)
             SendExternalKeyDown(modifier);

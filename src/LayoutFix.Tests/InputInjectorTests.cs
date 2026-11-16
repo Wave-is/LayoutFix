@@ -149,8 +149,10 @@ public class InputInjectorTests
         Assert.Equal(1, callCount);
     }
 
-    [Fact]
-    public async Task CopyChordTemporarilyNeutralizesHeldPhysicalShift()
+    [Theory]
+    [InlineData(Win32.VK_LSHIFT)]
+    [InlineData(Win32.VK_RSHIFT)]
+    public async Task CopyChordTemporarilyNeutralizesHeldPhysicalShift(int shiftKey)
     {
         Win32.INPUT[]? sentInputs = null;
         var injector = new InputInjector(
@@ -159,7 +161,7 @@ public class InputInjectorTests
                 sentInputs = inputs;
                 return (uint)inputs.Length;
             },
-            virtualKey => virtualKey == Win32.VK_SHIFT);
+            virtualKey => virtualKey == shiftKey);
 
         await injector.SendKeyCombinationAsync(true, false, false, "c");
 
@@ -167,20 +169,22 @@ public class InputInjectorTests
         Assert.Equal(
             new[]
             {
-                (Win32.VK_SHIFT, true),
+                (shiftKey, true),
                 (Win32.VK_CONTROL, false),
                 ((int)'C', false),
                 ((int)'C', true),
                 (Win32.VK_CONTROL, true),
-                (Win32.VK_SHIFT, false)
+                (shiftKey, false)
             },
             sentInputs!.Select(input => (
                 (int)input.u.ki.wVk,
                 (input.u.ki.dwFlags & Win32.KEYEVENTF_KEYUP) != 0)).ToArray());
     }
 
-    [Fact]
-    public async Task PasteChordTemporarilyNeutralizesHeldPhysicalShift()
+    [Theory]
+    [InlineData(Win32.VK_LSHIFT)]
+    [InlineData(Win32.VK_RSHIFT)]
+    public async Task PasteChordTemporarilyNeutralizesHeldPhysicalShift(int shiftKey)
     {
         Win32.INPUT[]? sentInputs = null;
         var injector = new InputInjector(
@@ -189,7 +193,7 @@ public class InputInjectorTests
                 sentInputs = inputs;
                 return (uint)inputs.Length;
             },
-            virtualKey => virtualKey == Win32.VK_SHIFT);
+            virtualKey => virtualKey == shiftKey);
 
         await injector.SendKeyCombinationAsync(true, false, false, "v");
 
@@ -197,20 +201,22 @@ public class InputInjectorTests
         Assert.Equal(
             new[]
             {
-                (Win32.VK_SHIFT, true),
+                (shiftKey, true),
                 (Win32.VK_CONTROL, false),
                 ((int)'V', false),
                 ((int)'V', true),
                 (Win32.VK_CONTROL, true),
-                (Win32.VK_SHIFT, false)
+                (shiftKey, false)
             },
             sentInputs!.Select(input => (
                 (int)input.u.ki.wVk,
                 (input.u.ki.dwFlags & Win32.KEYEVENTF_KEYUP) != 0)).ToArray());
     }
 
-    [Fact]
-    public async Task UnicodeTextTemporarilyNeutralizesHeldPhysicalShift()
+    [Theory]
+    [InlineData(Win32.VK_LSHIFT)]
+    [InlineData(Win32.VK_RSHIFT)]
+    public async Task UnicodeTextTemporarilyNeutralizesHeldPhysicalShift(int shiftKey)
     {
         Win32.INPUT[]? sentInputs = null;
         var injector = new InputInjector(
@@ -219,17 +225,17 @@ public class InputInjectorTests
                 sentInputs = inputs;
                 return (uint)inputs.Length;
             },
-            virtualKey => virtualKey == Win32.VK_SHIFT);
+            virtualKey => virtualKey == shiftKey);
 
         await injector.SendTextAsync("я");
 
         Assert.NotNull(sentInputs);
         Assert.Equal(4, sentInputs!.Length);
-        Assert.Equal((ushort)Win32.VK_SHIFT, sentInputs[0].u.ki.wVk);
+        Assert.Equal((ushort)shiftKey, sentInputs[0].u.ki.wVk);
         Assert.NotEqual(0u, sentInputs[0].u.ki.dwFlags & Win32.KEYEVENTF_KEYUP);
         Assert.Equal((ushort)'я', sentInputs[1].u.ki.wScan);
         Assert.Equal((ushort)'я', sentInputs[2].u.ki.wScan);
-        Assert.Equal((ushort)Win32.VK_SHIFT, sentInputs[3].u.ki.wVk);
+        Assert.Equal((ushort)shiftKey, sentInputs[3].u.ki.wVk);
         Assert.Equal(0u, sentInputs[3].u.ki.dwFlags & Win32.KEYEVENTF_KEYUP);
     }
 }

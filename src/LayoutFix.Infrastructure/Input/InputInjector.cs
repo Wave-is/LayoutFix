@@ -204,13 +204,24 @@ public class InputInjector : IInputInjector
         {
             new ModifierState((ushort)Win32.VK_CONTROL, ctrl),
             new ModifierState((ushort)Win32.VK_MENU, alt),
-            new ModifierState((ushort)Win32.VK_SHIFT, shift),
             new ModifierState((ushort)Win32.VK_LWIN, Desired: false),
             new ModifierState((ushort)Win32.VK_RWIN, Desired: false)
         };
         var pressed = modifiers
             .Select(modifier => modifier with { Pressed = _isKeyPressed(modifier.VirtualKey) })
-            .ToArray();
+            .ToList();
+        // Never reconstruct a physically held right Shift as generic VK_SHIFT
+        // (Windows can interpret that synthetic down as LEFT Shift). The real
+        // right-key release would then leave a different logical key down.
+        var leftShift = _isKeyPressed(Win32.VK_LSHIFT);
+        var rightShift = _isKeyPressed(Win32.VK_RSHIFT);
+        if (leftShift || rightShift)
+        {
+            if (leftShift) pressed.Add(new ModifierState(Win32.VK_LSHIFT, shift) { Pressed = true });
+            if (rightShift) pressed.Add(new ModifierState(Win32.VK_RSHIFT, shift) { Pressed = true });
+        }
+        else if (shift)
+            pressed.Add(new ModifierState(Win32.VK_LSHIFT, Desired: true));
         var physicalModifiersToRestore = pressed
             .Where(modifier => modifier.Pressed && !modifier.Desired)
             .Select(modifier => modifier.VirtualKey)
