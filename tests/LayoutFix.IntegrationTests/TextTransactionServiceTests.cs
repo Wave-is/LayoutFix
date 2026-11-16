@@ -6,6 +6,23 @@ namespace LayoutFix.IntegrationTests;
 
 public class TextTransactionServiceTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task MomentarilyCollapsedSelection_RecoveredBeforeNavigationOrReplacement(bool wordFallback)
+    {
+        var clipboard = new FakeClipboardService("unchanged");
+        var input = new FakeInputInjector(clipboard);
+        var guard = new SelectedTextTargetGuard(null, "ghbdtn vbh", null, "ghbdtn vbh")
+        { ConfirmEmptyCaret = true, ReturnVerifiedSelection = true };
+        var service = new TextTransactionService(input, clipboard, new FakeActiveWindowProvider(), new NullLogger(), guard);
+        var selection = await service.CaptureAsync(wordFallback);
+        Assert.Equal("ghbdtn vbh", selection?.Text);
+        Assert.True(await service.ReplaceAsync(selection!, "привет мир"));
+        Assert.Equal("привет мир", input.SentText);
+        Assert.Equal(0, input.SelectWordCount);
+        Assert.Equal(0, clipboard.CaptureCount);
+    }
     [Fact]
     public async Task DirectCapture_ReadsVerifiedSelectionWithoutClipboardOrInput()
     {
@@ -824,6 +841,7 @@ public class TextTransactionServiceTests
     {
         private readonly Queue<string?> _selections = new(selections);
         public bool ReturnVerifiedSelection { get; init; }
+        public bool ConfirmEmptyCaret { get; init; }
         public int CanModifyCount { get; private set; }
         public int SelectionReadCount { get; private set; }
 
@@ -844,7 +862,7 @@ public class TextTransactionServiceTests
                 ? _selections.Dequeue()
                 : _selections.Peek();
             return Task.FromResult(ReturnVerifiedSelection
-                ? TextSelectionReadResult.Verified(selection)
+                ? TextSelectionReadResult.Verified(selection) with { IsConfirmedCaret = ConfirmEmptyCaret && selection == null }
                 : TextSelectionReadResult.Captured(selection));
         }
     }

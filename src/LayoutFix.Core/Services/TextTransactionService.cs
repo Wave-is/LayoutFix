@@ -186,6 +186,13 @@ public sealed class TextTransactionService : ITextTransactionService
                 LogSupportDiagnostic(captureId, "capture", "rejected", "focus-changed-after-target-validation");
                 return null;
             }
+            if (selectionRead.IsConfirmedCaret && string.IsNullOrEmpty(selectionRead.Text))
+            {
+                var refreshed = await RecheckCaretAsync(window, captureInputGeneration, cancellationToken);
+                if (refreshed == null) return null;
+                if (refreshed.Value.IsSafeToModify && !string.IsNullOrEmpty(refreshed.Value.Text))
+                    selectionRead = refreshed.Value;
+            }
             var selectionAvailability = selectionRead.IsSupported
                 ? string.IsNullOrEmpty(selectionRead.Text)
                     ? TextSelectionAvailability.None
@@ -535,6 +542,13 @@ public sealed class TextTransactionService : ITextTransactionService
                 LogSupportDiagnostic(captureId, "replacement", "rejected", "focus-changed-after-safety-recheck");
                 return false;
             }
+            if (!selection.WasSelectedByFallback && selectionRead.IsConfirmedCaret && string.IsNullOrEmpty(selectionRead.Text))
+            {
+                var refreshed = await RecheckCaretAsync(selection.Window, selectionInputGeneration, cancellationToken);
+                if (refreshed == null) return false;
+                if (refreshed.Value.IsSafeToModify && !string.IsNullOrEmpty(refreshed.Value.Text))
+                    selectionRead = refreshed.Value;
+            }
             string? currentSelection;
             var verifyWithClipboard = !selectionRead.IsSupported ||
                 string.IsNullOrEmpty(selectionRead.Text) &&
@@ -709,6 +723,18 @@ public sealed class TextTransactionService : ITextTransactionService
             await _clipboard.RestoreAsync(snapshot, CancellationToken.None);
             _logger.LogInfo("Clipboard snapshot restored after long text replacement.");
         }
+    }
+
+    private async Task<TextSelectionReadResult?> RecheckCaretAsync(
+        ActiveWindowContext window, InputGenerationSnapshot generation, CancellationToken token)
+    {
+        await Task.Delay(50, token);
+        if (_targetGuard == null || InputChanged(generation) || !_activeWindow.IsSameActiveWindow(window))
+            return null;
+        var result = await _targetGuard.TryReadSelectedTextAsync(window, token);
+        if (InputChanged(generation) || !_activeWindow.IsSameActiveWindow(window) || !result.IsSafeToModify)
+            return null;
+        return result;
     }
 
     private async Task CollapseFallbackSelectionAsync(

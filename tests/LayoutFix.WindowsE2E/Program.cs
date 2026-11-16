@@ -215,6 +215,7 @@ internal static class Program
         string? browserTargetKind = null;
         var duplicateBrowserHotkeyDuringAction = false;
         var browserCaretFallbackTest = false;
+        var selectedPhrase = false;
         var middleOfWord = false;
         var holdHotkeyModifiersDuringAction = false;
         var browserNoOpSiblingLayoutTest = false;
@@ -302,12 +303,18 @@ internal static class Program
                     holdHotkeyModifiersDuringAction = true;
                 else if (string.Equals(browserMode, "sibling", StringComparison.OrdinalIgnoreCase))
                     browserNoOpSiblingLayoutTest = true;
+                else if (browserMode == "phrase") selectedPhrase = true;
                 else
                     return 64;
             }
             if (holdHotkeyModifiersDuringAction)
             {
                 configuredHotkey = "Shift+Scroll";
+                configuredHotkeyVirtualKey = 0x91;
+            }
+            else if (selectedPhrase)
+            {
+                configuredHotkey = "Scroll";
                 configuredHotkeyVirtualKey = 0x91;
             }
             browserHost = BrowserCompatibilityHost.Start(
@@ -355,7 +362,7 @@ internal static class Program
         [
             new HotkeyConfig
             {
-                Action = (browserCaretFallbackTest
+                Action = (browserCaretFallbackTest || selectedPhrase && !holdHotkeyModifiersDuringAction
                     ? HotkeyAction.FixLayout
                     : HotkeyAction.FixLayoutSelected).ToString(),
                 Hotkey = configuredHotkey,
@@ -605,6 +612,7 @@ internal static class Program
                 }
                 var browserManualCase = browserNoOpSiblingLayoutTest
                     ? new ManualCorrectionCase("no-op-sibling", "просто", "ghjcnj")
+                    : selectedPhrase ? new ManualCorrectionCase("explicit-phrase", "ghbdtn vbh", "привет мир")
                     : new ManualCorrectionCase("default", "ghbdtn", "привет");
                 if (existingTextAppWindow != IntPtr.Zero)
                 {
