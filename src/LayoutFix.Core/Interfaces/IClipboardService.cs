@@ -15,4 +15,5 @@ public interface IClipboardService : IDisposable
     Task SetTextAsync(string text, CancellationToken cancellationToken = default);
     uint GetSequenceNumber();
     bool IsOwnedByProcess(uint processId) => false;
+    bool IsOwnedByTarget(LayoutFix.Core.Models.ActiveWindowContext target) => IsOwnedByProcess(target.ProcessId);
 }

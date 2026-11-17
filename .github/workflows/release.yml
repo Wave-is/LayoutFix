@@ -166,6 +166,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Clipboard formats E2E failed with $LASTEXITCODE." }
           & $e2e --secure-target-test
           if ($LASTEXITCODE -ne 0) { throw "Secure target E2E failed with $LASTEXITCODE." }
+          & $e2e --embedded-field-test
+          if ($LASTEXITCODE -ne 0) { throw "Embedded field E2E failed with $LASTEXITCODE." }
           & $e2e --noneditable-pipeline-test
           if ($LASTEXITCODE -ne 0) { throw "Non-editable pipeline E2E failed with $LASTEXITCODE." }
           & $e2e --noneditable-exit-race-test

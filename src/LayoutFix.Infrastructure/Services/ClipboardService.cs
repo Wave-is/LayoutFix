@@ -117,6 +117,14 @@ public sealed class ClipboardService : IClipboardService
         return processId != 0 && owner != 0 && Win32.GetWindowThreadProcessId(owner, out var pid) != 0 && pid == processId;
     }
 
+    public bool IsOwnedByTarget(LayoutFix.Core.Models.ActiveWindowContext target)
+    {
+        if (IsOwnedByProcess(target.ProcessId)) return true;
+        return Win32.GetWindowThreadProcessId(target.FocusedWindow, out var focusedPid) != 0 &&
+            WindowsCompatibilityProbe.GetTargetInputAccess(focusedPid) == TargetInputAccess.Allowed &&
+            IsOwnedByProcess(focusedPid);
+    }
+
     private IClipboardSnapshot CaptureOnStaThread()
         => RetryTransientClipboardOperation(CaptureOnStaThreadOnce);
 

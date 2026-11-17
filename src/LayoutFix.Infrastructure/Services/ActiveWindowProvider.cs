@@ -50,8 +50,13 @@ public class ActiveWindowProvider : IActiveWindowProvider
         return process.ProcessName;
     }
     public string GetActiveLayoutCode()
+        => Win32.GetActiveLayoutCode();
+
+    public bool HasEmbeddedProcessFocus(ActiveWindowContext context)
     {
-        return Win32.GetActiveLayoutCode();
+        return context.FocusedWindow != IntPtr.Zero &&
+            Win32.GetWindowThreadProcessId(context.FocusedWindow, out var pid) != 0 &&
+            pid != context.ProcessId;
     }
 
     public void SwitchToNextLayout()

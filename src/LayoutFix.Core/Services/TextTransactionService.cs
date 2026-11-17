@@ -171,15 +171,29 @@ public sealed class TextTransactionService : ITextTransactionService
             var selectionRead = _targetGuard != null
                 ? await _targetGuard.TryReadSelectedTextAsync(window, cancellationToken)
                 : TextSelectionReadResult.Unsupported;
+            if (_activeWindow.HasEmbeddedProcessFocus(window))
+            {
+                // A proven read is not a proven write: reparented editors may silently
+                // consume only part of a Unicode batch or ignore a posted paste chord.
+                if (explicitCorrection && selectionRead.IsSafeToModify &&
+                    selectionRead.Text is { Length: > 0 and <= 32768 } embeddedText &&
+                    !InputChanged(captureInputGeneration) && _activeWindow.IsSameActiveWindow(window))
+                {
+                    LogSupportDiagnostic(captureId, "capture", "accepted", "embedded-selection-copy-only");
+                    return new TextSelection(embeddedText, window, false, DiagnosticCaptureId: captureId,
+                        AllowTargetLayoutActivation: false) { CopyOnly = true };
+                }
+                if (!explicitCorrection || selectionRead.IsSafeToModify) return null;
+            }
             if (!selectionRead.IsSafeToModify &&
                 _targetGuard != null &&
-                !await _targetGuard.CanModifyAsync(window, cancellationToken))
+                (_activeWindow.HasEmbeddedProcessFocus(window) || !await _targetGuard.CanModifyAsync(window, cancellationToken)))
             {
                 _logger.LogWarning("Text capture rejected because the focused control is secure or cannot be verified.");
                 LogSupportDiagnostic(captureId, "capture", "rejected", "target-safety-check-failed");
-                if (explicitCorrection && await _targetGuard.CanCopySteamDocumentAsync(window, cancellationToken))
+                if (explicitCorrection && await _targetGuard.CanCopyExplicitSelectionAsync(window, cancellationToken))
                 {
-                    LogSupportDiagnostic(captureId, "target-probe", "accepted", "steam-document-copy-permitted");
+                    LogSupportDiagnostic(captureId, "target-probe", "accepted", "explicit-copy-permitted");
                     bool SameTarget() => !InputChanged(captureInputGeneration) && _activeWindow.IsSameActiveWindow(window);
                     if (!SameTarget()) return null;
                     using var saved = await _clipboard.CaptureAsync(cancellationToken);
@@ -192,22 +206,22 @@ public sealed class TextTransactionService : ITextTransactionService
                         while (_clipboard.GetSequenceNumber() == before && elapsed.Elapsed < CopyTimeout && SameTarget())
                             await Task.Delay(15, cancellationToken);
                         var copied = _clipboard.GetSequenceNumber();
-                        if (copied == before || !SameTarget() || !_clipboard.IsOwnedByProcess(window.ProcessId))
+                        if (copied == before || !SameTarget() || !_clipboard.IsOwnedByTarget(window))
                         {
                             LogSupportDiagnostic(captureId, "capture", "rejected", copied == before
-                                ? "steam-copy-no-change" : "steam-copy-ownership-unverified");
+                                ? "explicit-copy-no-change" : "explicit-copy-ownership-unverified");
                             return null;
                         }
                         var value = await _clipboard.ReadTextAsync(cancellationToken);
                         if (string.IsNullOrWhiteSpace(value) || value.Length > 32768 ||
                             !SameTarget() || copied != _clipboard.GetSequenceNumber()) return null;
-                        LogSupportDiagnostic(captureId, "capture", "accepted", "steam-copy-only", $"Length={value.Length}");
+                        LogSupportDiagnostic(captureId, "capture", "accepted", "explicit-copy-only", $"Length={value.Length}");
                         return new TextSelection(value, window, false, DiagnosticCaptureId: captureId,
                             AllowTargetLayoutActivation: false) { CopyOnly = true };
                     }
                     finally
                     {
-                        if (_clipboard.GetSequenceNumber() != before && _clipboard.IsOwnedByProcess(window.ProcessId))
+                        if (_clipboard.GetSequenceNumber() != before && _clipboard.IsOwnedByTarget(window))
                             await _clipboard.RestoreAsync(saved, CancellationToken.None);
                     }
                 }
@@ -654,7 +668,8 @@ public sealed class TextTransactionService : ITextTransactionService
             var replacementReason = "input-injected";
             if (replacement.Length >= ClipboardPasteThreshold)
             {
-                await PasteTextAsync(replacement, cancellationToken);
+                if (!await PasteTextAsync(replacement, selection.Window, replacementInputGeneration, cancellationToken))
+                    return false;
                 replacementReason = "clipboard-paste";
             }
             else
@@ -746,8 +761,10 @@ public sealed class TextTransactionService : ITextTransactionService
         return null;
     }
 
-    private async Task PasteTextAsync(
+    private async Task<bool> PasteTextAsync(
         string text,
+        ActiveWindowContext window,
+        InputGenerationSnapshot generation,
         CancellationToken cancellationToken)
     {
         using var snapshot = await _clipboard.CaptureAsync(cancellationToken);
@@ -755,10 +772,12 @@ public sealed class TextTransactionService : ITextTransactionService
         try
         {
             await _clipboard.SetTextAsync(text, cancellationToken);
+            if (InputChanged(generation) || !_activeWindow.IsSameActiveWindow(window)) return false;
             await _input.SendKeyCombinationAsync(true, false, false, "v");
             // Ctrl+V is queued to the target UI thread. Give it one bounded
             // processing turn before restoring every original clipboard format.
             await Task.Delay(100, cancellationToken);
+            return true;
         }
         finally
         {

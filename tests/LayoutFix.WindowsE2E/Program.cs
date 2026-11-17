@@ -55,6 +55,10 @@ internal static class Program
     private static int Main(string[] args)
     {
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        if (args.Length == 3 && args[0] == "--embedded-field-child")
+            return EmbeddedFieldFixture.Child((nint)long.Parse(args[1]), args[2]);
+        if (args.Length == 1 && args[0] == "--embedded-field-test")
+            return EmbeddedFieldFixture.Run(TryClaimForeground);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         if (args.Length == 4 && args[0] == "--installed-update-start")
@@ -417,7 +421,7 @@ internal static class Program
             clipboard,
             activeWindow,
             logger,
-            steamCopyFixture ? new SteamCopyFixtureGuard() : targetGuard,
+            targetGuard,
             keyboardHook,
             mouseHook,
             directTextAdapter,
@@ -632,7 +636,8 @@ internal static class Program
                         catch (IOException) { rejectionLog = string.Empty; }
                     } while (!rejectionLog.Contains("Phase=action-timing", StringComparison.Ordinal) &&
                              DateTime.UtcNow < rejectionDeadline);
-                    var rejected = rejectionLog.Contains("DiagnosticCode: LF-HK-004", StringComparison.Ordinal) &&
+                    var rejected = (rejectionLog.Contains("DiagnosticCode: LF-HK-004", StringComparison.Ordinal) ||
+                        rejectionLog.Contains("Reason=explicit-copy-only", StringComparison.Ordinal)) &&
                                    rejectionLog.Contains("Phase=action-timing", StringComparison.Ordinal);
                     var unchanged = browserHost!.TryReadTargetText(out var readOnlyText) && readOnlyText.TrimEnd('\r', '\n') == "TEST";
                     var clipboardUnchanged = await clipboard.ReadTextAsync() == ClipboardSentinel;
@@ -5759,13 +5764,6 @@ internal static class Program
         }
     }
 
-    // Emulates only the Steam-specific classification; all input, clipboard,
-    // correction, popup and browser code in the fixture is real.
-    private sealed class SteamCopyFixtureGuard : ITextTargetGuard
-    {
-        public Task<bool> CanModifyAsync(ActiveWindowContext c, CancellationToken token = default) => Task.FromResult(false);
-        public Task<bool> CanCopySteamDocumentAsync(ActiveWindowContext c, CancellationToken token) => Task.FromResult(true);
-    }
 
     private static int RunBlacklistedProcessHost(string resultPath)
     {

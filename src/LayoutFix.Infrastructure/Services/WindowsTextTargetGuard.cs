@@ -492,7 +492,7 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
             return false;
         }
 
-        if (element.Current.ProcessId != context.ProcessId)
+        if (!BelongsToTarget(element, context))
         {
             LogAutomationDiagnostic(logger, diagnosticsEnabled, "ProcessMatch=False");
             return false;
@@ -526,6 +526,8 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
             isEditOrDocument,
             hasTextPattern,
             writableGroup);
+        if (accepted && current.ProcessId != context.ProcessId && !hasWritableValuePattern)
+            accepted = HasWritableSelection(textPatternObject as TextPattern);
         LogAutomationDiagnostic(
             logger,
             diagnosticsEnabled,
@@ -565,8 +567,8 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
         if (current.ControlType != ControlType.Group || textPattern == null ||
             !current.IsEnabled || !current.IsKeyboardFocusable ||
             !current.HasKeyboardFocus || current.IsPassword ||
-            !IsChromiumGroupCandidate(WindowClass(context.ForegroundWindow),
-                current.ProcessId == context.ProcessId, true, current.HasKeyboardFocus))
+            !(IsChromiumGroupCandidate(WindowClass(context.ForegroundWindow),
+                current.ProcessId == context.ProcessId, true, current.HasKeyboardFocus) || IsChromeWidget(context.FocusedWindow)))
             return false;
 
         try
@@ -636,21 +638,58 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
     private static bool IsChromiumTopLevelWindow(ActiveWindowContext context) =>
         IsChromeWidget(context.ForegroundWindow);
 
-    public async Task<bool> CanCopySteamDocumentAsync(ActiveWindowContext context, CancellationToken token)
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool IsChild(nint parent, nint child);
+
+    private static bool HasWritableSelection(TextPattern? pattern)
+    {
+        if (pattern == null) return false;
+        var ranges = pattern.GetSelection();
+        return ranges.Length == 1 && ranges[0].GetAttributeValue(TextPattern.IsReadOnlyAttribute) is false &&
+            pattern.DocumentRange.GetAttributeValue(TextPattern.IsReadOnlyAttribute) is false;
+    }
+
+    private static bool BelongsToTarget(AutomationElement element, ActiveWindowContext context)
+    {
+        var pid = element.Current.ProcessId;
+        if (pid == context.ProcessId) return true;
+        if (pid <= 0 || WindowsCompatibilityProbe.GetTargetInputAccess((uint)pid) != TargetInputAccess.Allowed ||
+            Win32.GetForegroundWindow() != context.ForegroundWindow ||
+            (context.FocusedWindow != context.ForegroundWindow && !IsChild(context.ForegroundWindow, context.FocusedWindow)))
+            return false;
+        var node = element;
+        for (int depth = 0; node != null && depth < 16; depth++, node = TreeWalker.RawViewWalker.GetParent(node))
+        {
+            var hwnd = (nint)node.Current.NativeWindowHandle;
+            if (hwnd == 0) continue;
+            return hwnd == context.FocusedWindow || IsChild(context.FocusedWindow, hwnd);
+        }
+        return false;
+    }
+
+    public async Task<bool> CanCopyExplicitSelectionAsync(ActiveWindowContext context, CancellationToken token)
     {
         if (!context.IsValid || !_activeWindow.IsSameActiveWindow(context) ||
-            WindowClass(context.ForegroundWindow) != "SDL_app" || !IsChromeWidget(context.FocusedWindow) ||
             _integrityProbe(context.ProcessId) != TargetInputAccess.Allowed ||
             !_selectionProbeGate.Wait(0)) return false;
         var probe = Task.Run(() =>
         {
-            using var process = Process.GetProcessById(checked((int)context.ProcessId));
-            if (!process.ProcessName.Equals("steamwebhelper", StringComparison.OrdinalIgnoreCase)) return false;
             var focused = AutomationElement.FocusedElement;
-            if (focused == null) return false;
+            if (focused == null || !BelongsToTarget(focused, context)) return false;
             var current = focused.Current;
-            return current.ProcessId == process.Id && current.IsEnabled && !current.IsPassword &&
-                current.ControlType == ControlType.Document;
+            if (!current.IsEnabled || current.IsPassword) return false;
+            if (current.ControlType != ControlType.Document && current.ControlType != ControlType.Edit &&
+                current.ControlType != ControlType.Group && current.ControlType != ControlType.Text) return false;
+            if (focused.TryGetCurrentPattern(TextPattern.Pattern, out var pattern) && pattern is TextPattern text)
+            {
+                var ranges = text.GetSelection();
+                return ranges.Length == 1 && ranges[0].CompareEndpoints(TextPatternRangeEndpoint.Start,
+                    ranges[0], TextPatternRangeEndpoint.End) < 0;
+            }
+            // Chromium can expose a focused selectable DOM group without TextPattern.
+            // This authorizes only Ctrl+C; never treat its clipboard response as write permission.
+            return (current.ControlType == ControlType.Document || current.ControlType == ControlType.Group) &&
+                current.HasKeyboardFocus && IsChromeWidget(context.FocusedWindow);
         });
         // A stalled provider retains its single probe slot until it actually exits.
         _ = probe.ContinueWith(t => { _ = t.Exception; _selectionProbeGate.Release(); },
@@ -745,7 +784,7 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
         ActiveWindowContext context)
     {
         var element = AutomationElement.FocusedElement;
-        if (element == null || element.Current.ProcessId != context.ProcessId ||
+        if (element == null || !BelongsToTarget(element, context) ||
             !element.TryGetCurrentPattern(TextPattern.Pattern, out var patternObject) ||
             patternObject is not TextPattern textPattern)
         {
@@ -774,7 +813,7 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
         }
 
         var current = element.Current;
-        if (current.ProcessId != context.ProcessId)
+        if (!BelongsToTarget(element, context))
         {
             LogAutomationDiagnostic(logger, diagnosticsEnabled, "ProcessMatch=False");
             return TextSelectionReadResult.Unsupported;
@@ -805,6 +844,8 @@ public sealed class WindowsTextTargetGuard : ITextTargetGuard, IDisposable
             isEditOrDocument,
             hasTextPattern,
             writableGroup);
+        if (editable && current.ProcessId != context.ProcessId && !hasWritableValuePattern)
+            editable = HasWritableSelection(patternObject as TextPattern);
         LogAutomationDiagnostic(
             logger,
             diagnosticsEnabled,

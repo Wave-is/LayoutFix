@@ -6,6 +6,7 @@ public interface IActiveWindowProvider
 {
     ActiveWindowContext CaptureActiveWindow();
     bool IsSameActiveWindow(ActiveWindowContext context);
+    bool HasEmbeddedProcessFocus(ActiveWindowContext context) => false;
     string GetActiveProcessName();
     string GetActiveLayoutCode();
     void SwitchToNextLayout();

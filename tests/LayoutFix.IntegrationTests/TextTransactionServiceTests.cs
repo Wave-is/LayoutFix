@@ -983,7 +983,7 @@ public class TextTransactionServiceTests
     private sealed class DenyTextTargetGuard : ITextTargetGuard
     {
         public bool EligibleForCopy { get; init; }
-        public Task<bool> CanCopySteamDocumentAsync(ActiveWindowContext c, CancellationToken token) =>
+        public Task<bool> CanCopyExplicitSelectionAsync(ActiveWindowContext c, CancellationToken token) =>
             Task.FromResult(EligibleForCopy);
         public Task<bool> CanModifyAsync(
             ActiveWindowContext context,
